@@ -110,5 +110,7 @@ if (output)
 assert.deepEqual(errors, []);
 await browser.close();
 console.log(
-  "Passed: all pages, real API prediction, input validation, API failure, mobile navigation and overflow.",
+  process.env.EXPECT_API === "false"
+    ? "Passed: public pages, saved exports, input validation, missing-backend message, mobile navigation and overflow. Public inference was not tested or claimed."
+    : "Passed: all pages, real API prediction, input validation, API failure, mobile navigation and overflow.",
 );

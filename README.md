@@ -176,6 +176,9 @@ the full real prediction workflow runs locally. Cold-start services may need a r
 - Browser smoke tests pass navigation across all five pages, actual API inference,
   validation, failed-API errors, mobile menu behavior and horizontal overflow.
 - Desktop/mobile screenshots reviewed. Production build succeeds with prefixed assets.
+- Public Pages verification passed all five routes, mobile layout and the unavailable-backend
+  message. Four repository-prefixed assets returned HTTP 200; all three public JSON exports
+  matched notebook artifacts. Public inference remains unavailable pending backend hosting.
 
 ```powershell
 cd frontend
