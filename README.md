@@ -1,176 +1,228 @@
-# NearMiss — Predicting Risky Vehicle Encounters and Future Vehicle Trajectories
+# Traffic Analysis and Prediction
+## TrafficRush — Predicting High Traffic Conditions Using Machine Learning
 
-A completed **CSE3141 Predictive Analytics mini project**, Manipal University Jaipur.
-All executable project Python is inside one
-[executed Jupyter Notebook](NearMiss_Complete_Predictive_Analytics.ipynb).
+CSE3141 Predictive Analytics mini project, Manipal University Jaipur.
 
-## Research questions
+[Website](https://doctordictator.github.io/CSE3141-Predictive-Analytics/) ·
+[Executed notebook](notebooks/Traffic_Analysis_and_Prediction.ipynb) ·
+[UCI dataset](https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume)
 
-1. Can a currently noncritical same-lane following interaction enter a defined low-TTC condition within three seconds, and does recent history help predict it?
-2. Can Gaussian identity-link GLMs forecast vehicle X/Y coordinates one second ahead, and do acceleration/variability features improve on basic past displacement?
+## Purpose and actual results
 
-Stage 1 was implemented, executed and verified before Stage 2 was added. In every
-fresh sequential run, an explicit Stage 1 gate must pass before regression begins.
-These are separate targets and models, sharing cleaned data.
+Can weather, time of day, weekday and holidays help identify high-volume highway hours?
+**High Traffic means at least 4,722 vehicles/hour**, the training-period 70th percentile.
+It does not necessarily mean a jam, crash risk, or live traffic condition.
 
-## Real data and provenance
+The genuine UCI dataset contains **48,204 source records**, covering October 2012 to
+September 2018 at westbound I-94 ATR station 301, Minneapolis–Saint Paul. After
+investigating repeated timestamps and retaining one consistent source weather report
+per hour, **40,575 unique hours** remain. Temperature is converted from Kelvin to
+Celsius; precipitation is in millimetres/hour.
 
-[USDOT NGSIM official catalog](https://data.transportation.gov/d/8ect-6jqj).
-The notebook inspects the official schema and recording origins, then downloads the
-**complete earliest US-101 recording**, origin 1118846978900, rather than an arbitrary page.
-It contains **1,180,598 observations, 2,169 vehicles**, at 100-ms intervals.
-There are 1,180,598 cleaned observations and 1,119,307 geometry-validated
-same-lane pair observations. Original measurements use feet, feet/s and feet/s²;
-the notebook converts to SI with 0.3048.
+| Final chronological test metric | Time + weather |
+|---|---:|
+| Accuracy | 92.84% |
+| Precision | 0.8849 |
+| Recall | 0.8885 |
+| F1 | 0.8867 |
+| ROC-AUC | 0.9770 |
 
-[Official US-101 dictionary](https://data.transportation.gov/api/views/8ect-6jqj/files/ddb2c29d-2ef4-4b67-94ea-b55169229bd9?download=true&filename=1-+US+101+Metadata+Documentation.pdf).
-Local_X/Y are front-center coordinates. Clear gap is leader Y minus leader length
-minus follower Y. Recorded leader/follower references, lane, ordering and timestamp
-must agree. Source vehicle IDs repeat across recordings, so recording identity is
-explicit. [FHWA program attribution and data access](https://ops.fhwa.dot.gov/trafficanalysistools/ngsim.htm).
-Raw data is not redistributed in GitHub.
+Majority-class test accuracy: **68.46%**. The original experiment uses the same
+Logistic Regression algorithm, tuning opportunities and chronological partitions:
 
-## Setup and run
+| Feature group | Test F1 | Test ROC-AUC |
+|---|---:|---:|
+| Time only | 0.8835 | 0.9761 |
+| Time + weather | 0.8867 | 0.9770 |
 
-Tested with **Python 3.13.9**. Use Python 3.13 for the pinned
-scientific stack in requirements.txt.
+Weather adds a small improvement: **+0.0032 F1**, **+0.0009 AUC**. This is not a
+causal or statistical-significance claim. All numbers come from actual execution.
+
+## Notebook and validation
+
+The **24-cell notebook** follows the straightforward pandas/scikit-learn style of
+the supplied airline reference (20 cells), inspected before implementation.
+The actual CSE3141 handout was also reviewed. This project demonstrates its
+collection, preprocessing, missingness/outlier investigation, EDA, visualization,
+feature engineering/selection, Binary Logistic Regression and validation topics.
+It does not add unrelated algorithms just to reproduce the entire syllabus.
+
+All downloading, cleaning, analysis, feature preparation, training, evaluation,
+research comparison and artifact-export Python stays inside the main notebook.
+The only application Python file, FastAPI's `backend/main.py`, serves frozen
+artifacts and never trains a model.
+
+- Download/cache the official UCI archive. If unavailable, save the official ZIP as
+  `data/raw/metro_interstate_traffic_volume.zip` and rerun.
+- Audit missingness, exact duplicates, repeated timestamps, conflicting hourly volume,
+  physical invalidity and IQR flags. Zero Kelvin becomes missing for training-fit
+  imputation. Unusual nonnegative weather values are investigated and retained.
+- Consistent repeated hours keep the first source weather record, without target-based
+  ranking. Conflicting-volume hours would be quarantined. No missing hours are invented.
+- Holiday status is a known calendar-day property; source midnight markers are propagated
+  within the date. Weekend is omitted from predictors because weekday determines it.
+- Chronological split: **28,402 training / 6,086 validation / 6,087 test hours**.
+  Duplicate hours cannot enter different partitions. The volume cutoff uses training only.
+- Pipeline: training-fit median/most-frequent imputation, numeric scaling and categorical
+  one-hot encoding with unknown-category handling. Hour, weekday and month are categorical,
+  allowing nonmonotonic rush-hour patterns. Volume and weather_description are not inputs.
+- C grid {0.1, 1, 10} uses one predefined chronological validation fold and F1.
+  Primary selected C: **0.1**. This is a holdout validation fold, not repeated random CV.
+  Models remain training-fit; the probability decision cutoff stays **0.5**.
+- Time + weather is the predeclared primary model; time only is the research ablation.
+  Final test outcomes never select features or hyperparameters.
+- Metrics, confusion matrix, classification report, ROC, coefficients and historical
+  aggregates are exported alongside the complete fitted Joblib pipeline.
+  Export/reload probabilities are verified.
+
+## Local setup
+
+Tested with **Python 3.13.9** and **Node 24**. Use Python 3.13 with the pinned
+scientific dependencies so the Joblib artifact loads consistently.
 
 ```powershell
 py -3.13 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
-.\.venv\Scripts\python -m jupyterlab NearMiss_Complete_Predictive_Analytics.ipynb
+.\.venv\Scripts\python -m jupyterlab notebooks/Traffic_Analysis_and_Prediction.ipynb
 ```
 
-Launch from this repository root, choose the environment's Python kernel, then
-**Restart Kernel and Run All Cells**. All statistical logic, helpers, integrity
-assertions, plots, fitted models and evaluations are in the notebook. No .py
-modules, dashboard, traffic simulator or monitoring application is required.
+Select the environment's Python kernel and **Restart Kernel and Run All Cells**.
+Launch at the repository root or inside `notebooks/`. The notebook exports model
+artifacts to `backend/artifacts/` and real saved dashboard JSON to
+`frontend/public/data/`.
 
-The first full download is about 100 MB on disk and may take several minutes.
-API calls use bounded pagination, retry/backoff for rate limits/server failures
-and interrupted response bodies, and per-page caching in data/raw/. A SHA-256
-manifest verifies subsequent local reuse (local integrity, not a publisher checksum).
-The source-row count and recording-origin checks prevent silently accepting a
-truncated interval. Subsequent runs reuse the cached recording.
+Start the API from the repository root:
 
-**Local-file fallback:** export the selected complete recording from
-https://data.transportation.gov/resource/8ect-6jqj.csv with
-location='us-101' AND global_time-frame_id*100=1118846978900, requesting the columns
-shown in the notebook. Save it as data/raw/us101_complete_recording.csv.
-With no manifest, the notebook validates schema, exact expected row count and
-recording origin before accepting it. Cached official catalog/recording metadata
-or network access to those endpoints is needed to verify provenance. Failed
-downloads produce a specific error; synthetic substitutes are never used.
+```powershell
+.\.venv\Scripts\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
 
-## Shared preparation and evaluation controls
+In another terminal:
 
-Missingness, malformed values, exact/conflicting duplicates, physical validity,
-IQR/Z-score flags, continuity and leader-reference checks are reported. Statistical
-extremes are investigated, not blindly removed. No interpolation bridges missing
-observations. EDA includes distributions, speed/position traces, geometry,
-descriptive statistics and correlations with purpose/interpretation.
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
 
-One complete source recording supplies chronological 60%/20%/20% blocks with
-a five-second embargo on either side of boundaries. Entire following encounters
-(Stage 1) or vehicle trajectories (Stage 2) crossing blocks are excluded.
-Every history-to-target support interval is checked against its block. There is
-no random row split. This is one **purged predefined validation fold**, not
-independent-day testing or repeated random cross-validation. Validation is reused
-for selection and its estimates are optimistic. All preprocessing fits training only.
+Open **http://127.0.0.1:5173/CSE3141-Predictive-Analytics/**.
+The local frontend defaults to the local API. Override `VITE_API_URL` with an
+untracked `.env.local` if needed; see `frontend/.env.example`.
 
-## Stage 1 — future surrogate risk classification
+## Architecture and interface
 
-Primary label: any observed TTC ≤2 seconds in (t,t+3s], for a currently noncritical
-pair. The cutoff is a project-defined experimental threshold; training/validation
-sensitivity at 1.5/2/2.5 s is included. A complete unchanged, same-lane pair horizon
-is required; missing future observations and leader/lane changes are censored,
-never automatically safe. TTC uses positive closing speed; nonclosing cases have
-infinite TTC and zero inverse TTC.
+**Notebook → fitted Joblib pipeline + genuine JSON → FastAPI → React**.
 
-A two-second trailing window supplies historical summaries. Current-state features
-are gap, closing speed and inverse TTC. The enriched model adds past gap trend,
-relative-speed change, variability, mean acceleration and braking fraction.
-Anchors are one second apart; overlapping windows stay within their partition.
+React/Vite, Tailwind CSS, Recharts, Lucide and Fetch provide five pages:
+Overview, Traffic Analysis, Traffic Prediction, Model Performance and About.
+The form accepts local date/hour, holiday, Celsius temperature, rain/snow, clouds
+and weather. FastAPI derives calendar fields only. Learned imputation, encoding
+and scaling remain inside the exact exported pipeline. No prediction formula or
+hardcoded probability exists in JavaScript.
 
-Binary Logistic Regression uses a training-fit imputer/scaler Pipeline, L2
-regularization, fixed balanced class weights and C∈{0.1,1,10} grid selection by
-validation average precision. Probability thresholds maximize validation F1.
-The current-TTC rule chooses its warning cutoff on validation, not test.
+| Endpoint | Responsibility |
+|---|---|
+| GET `/api/health` | API and model-load state |
+| GET `/api/overview` | Actual dataset summary and volume cutoff |
+| GET `/api/analytics` | Precomputed historical chart aggregates |
+| GET `/api/model/metrics` | Test results, experiment, coefficients and metadata |
+| POST `/api/predict` | Real category, both probabilities and input snapshot |
 
-Training/validation/test anchors: **47,764 / 12,521 / 16,330**.
-Test onset prevalence: **2.71%**.
+Pydantic validates weather ranges, categories and local whole-hour timestamps.
+Timezone offsets are rejected rather than silently converting the source's
+local wall-clock convention. The default CORS list permits the actual Pages origin
+and local Vite origins. `CORS_ORIGINS` can override it. Missing artifacts return useful
+unavailable errors. Load only trusted local project Joblib artifacts.
 
-| Model | precision | recall | f1 | roc_auc | average_precision |
-|---|---:|---:|---:|---:|---:|
-| TTC_rule | 0.268 | 0.305 | 0.285 | 0.747 | 0.198 |
-| current | 0.257 | 0.293 | 0.274 | 0.862 | 0.201 |
-| history | 0.277 | 0.269 | 0.273 | 0.869 | 0.202 |
+## Deployment
 
-**Research finding:** history-minus-current F1 -0.001, ROC-AUC
-+0.006. History does not improve every metric; the rule's F1
-is 0.285. History-model false positives:
-310; false negatives: 324. Never warning would yield
-97.29% accuracy with zero onset recall, illustrating why
-accuracy alone is misleading.
+**Frontend:** GitHub Pages uses `.github/workflows/deploy-pages.yml`, the correct
+repository base path and hash routes, including direct page links. Saved chart JSON
+contains authentic notebook exports; the UI labels this state **Saved analysis**.
 
-Class-weighted probabilities are poorly calibrated: history Brier score
-0.262, versus
-0.027 for a constant training-prevalence probability.
-ROC/PR curves, confusion counts and a calibration plot are included. Ranking
-performance is not evidence of reliable real-world accident probabilities.
+**Backend:** local prediction is fully verified, but **public inference is pending
+a connected Python hosting account**. Render was discovered as available but is
+not connected, and no hosting credentials are present. No public API URL or
+working public prediction feature is claimed. The site shows an explanation/error
+instead of invented predictions.
 
-## Stage 2 — coordinate forecasting
+A prepared `render.yaml` deploys the existing FastAPI service and checked-in artifacts.
+Render's [current free-service documentation](https://render.com/docs/free) supports
+Python web services, with 15-minute idle spin-down, roughly one-minute cold starts
+and workspace quotas. Account eligibility and remaining allowance must be checked
+in the user's account; no paid resource or free hosting entitlement is assumed.
+See [Render FastAPI deployment](https://render.com/docs/deploy-fastapi).
 
-Two **statsmodels Gaussian GLMs with identity links** predict one-second ΔX/ΔY.
-Add predicted displacement to current coordinates to reconstruct X/Y. The basic
-feature set uses past one-second displacement; the enriched set adds speed,
-acceleration, changes in velocity and displacement variability. A constant-velocity
-baseline extrapolates the same past one-second average velocity. All methods use
-the same samples; no future coordinate is an input.
+To finish public inference after connecting hosting:
 
-Training/validation/test endpoints: **60,399 / 14,850 / 18,020**,
-with disjoint vehicle IDs. Validation selected **enriched** GLMs by mean
-Euclidean endpoint error. All errors below are metres; R² is on displacement.
+1. Deploy the blueprint, or create a Python web service with root directory `backend`.
+2. Build with `pip install -r requirements.txt`.
+3. Start with `uvicorn main:app --host 0.0.0.0 --port $PORT`; use Python 3.13.9.
+4. Set `CORS_ORIGINS=https://doctordictator.github.io`.
+5. Verify the returned HTTPS `/api/health` reports `model_loaded: true` and test a POST.
+6. Set repository Actions variable `VITE_API_URL` to that exact HTTPS API origin.
+7. Rerun **Deploy TrafficRush to GitHub Pages** and verify the public form.
 
-| Model | MAE_X | MAE_Y | RMSE_X | RMSE_Y | R2_delta_X | R2_delta_Y | mean_position_error | median_position_error |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| constant_velocity | 0.135 | 0.638 | 0.247 | 0.932 | -0.506 | 0.961 | 0.684 | 0.541 |
-| basic | 0.111 | 0.657 | 0.195 | 0.934 | 0.057 | 0.961 | 0.690 | 0.504 |
-| enriched | 0.104 | 0.393 | 0.187 | 0.636 | 0.141 | 0.982 | 0.433 | 0.286 |
+Until then, the public site provides historical analysis and model results, while
+the full real prediction workflow runs locally. Cold-start services may need a retry.
 
-Enriched-minus-basic mean endpoint error: **-0.257 m** (negative
-means improvement). Charts show actual/predicted X/Y, error distributions, residual
-diagnostics, feature-group comparisons and a real held-out endpoint forecast.
-Coordinate forecasting is not demonstrated to improve Stage 1 risk predictions.
+## Verification
 
-## Limitations
+- Executed all 24 notebook cells and verified a fresh-kernel restart/run-all.
+- Exported pipeline reload reproduces notebook test probabilities.
+- Four GET endpoints passed; three representative held-out inputs matched
+  notebook/API class and probability to 1e-12.
+- Seven invalid-input cases rejected; permitted and unlisted CORS origins checked.
+- Browser smoke tests pass navigation across all five pages, actual API inference,
+  validation, failed-API errors, mobile menu behavior and horizontal overflow.
+- Desktop/mobile screenshots reviewed. Production build succeeds with prefixed assets.
 
-This predicts a recorded **surrogate condition**, not confirmed accidents.
-One recording, reconstruction noise, temporal drift, within-encounter dependence
-and complete-horizon selection limit generalization. Excluded lane changes and
-short/disappearing encounters are outside the stable-following cohort.
-Stage 1 needs independent probability calibration. Stage 2 Gaussian working
-assumptions are diagnosed, not presumed; ordinary independent-error inferential
-p-values are not used as evidence. No causal, autonomous-driving or deployment
-claim is made. Future studies need independent intervals/sites, grouped temporal
-validation, cluster uncertainty and a separate calibration block.
+```powershell
+cd frontend
+npm run build
+npm run test:smoke
+```
 
-## Submission structure
+Browser tests need the local backend and Vite server. Windows tests use installed
+Chrome; elsewhere run `npx playwright install chromium`. `TEST_URL` can target the
+production preview. `QA_SCREENSHOT_DIR` saves optional screenshots outside the repo.
+Public deployment checks are distinct from these local integration results.
+
+## Limitations and improvements
+
+This is one station's historical count dataset, not a live road network.
+High counts do not establish low speeds or congestion. Selecting one source
+weather record loses detail. Unusual precipitation, zero-temperature sentinels
+and missing hours remain limitations. Supplied same-hour weather is assumed
+available, not independently forecast. Adjacent hours are dependent, validation is
+reused for model selection, and probability calibration is not independently tested.
+Coefficients are observational associations rather than causes. Improve with new
+stations/years, rolling-origin evaluation and an independent calibration block.
+
+## Project structure
 
 ```text
-NearMiss_Complete_Predictive_Analytics.ipynb   # all code, outputs and conclusions
-README.md
+notebooks/Traffic_Analysis_and_Prediction.ipynb  # all ML and analytical Python
+backend/main.py                               # frozen-model serving only
+backend/artifacts/                            # model and actual exported results
+frontend/src/                                 # React dashboard and API client
+frontend/public/data/                         # genuine saved notebook summaries
+frontend/tests/smoke.mjs                       # browser integration checks
+.github/workflows/deploy-pages.yml             # frontend deployment
+render.yaml                                   # prepared backend hosting blueprint
 requirements.txt
-.gitignore
-data/raw/.gitkeep                            # raw recordings remain local
+README.md
 ```
 
-All charts and results are embedded in the notebook; no external Python or model
-files are needed. README and requirements are populated by its final executed cell.
+Raw data, environments, node_modules, temporary screenshots and credentials are
+excluded from commits. The previous edited NearMiss project was preserved locally
+outside this repository before replacement.
 
-## References
+## Attribution
 
-- USDOT/FHWA NGSIM catalog and US-101 data dictionary linked above.
-- [FHWA Surrogate Safety Assessment Model](https://www.fhwa.dot.gov/publications/research/safety/08051/): TTC context; the two-second onset cutoff is this project's design choice.
-- [statsmodels GLM documentation](https://www.statsmodels.org/stable/glm.html).
-- [scikit-learn Logistic Regression](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html).
+Hogue, J. (2019). *Metro Interstate Traffic Volume* [Dataset]. UCI Machine Learning
+Repository. https://doi.org/10.24432/C5X60B . **CC BY 4.0**. Aggregates and the model
+derive from this attributed dataset; raw data is downloaded rather than committed.
+UCI supplies a regression count target; this project creates its own training-defined
+binary label. The airline ZIP informed code simplicity and architecture, not the
+traffic data, trained model or reported scores. The supplied CSE3141 handout was reviewed.

@@ -5,3 +5,10 @@ data/raw/*
 !data/raw/.gitkeep
 *.partial
 *.log
+node_modules/
+frontend/dist/
+.env
+.env.*
+!.env.example
+frontend/playwright-report/
+frontend/test-results/

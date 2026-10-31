@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: trafficrush-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.9
+      - key: CORS_ORIGINS
+        value: https://doctordictator.github.io,http://localhost:5173,http://127.0.0.1:5173

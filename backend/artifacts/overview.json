@@ -1,0 +1,17 @@
+{
+  "raw_observations": 48204,
+  "unique_hours": 40575,
+  "training_hours": 28402,
+  "validation_hours": 6086,
+  "test_hours": 6087,
+  "start": "2012-10-02 09:00:00",
+  "end": "2018-09-30 23:00:00",
+  "high_percent": 30.499075785582253,
+  "normal_percent": 69.50092421441775,
+  "volume_threshold": 4722.0,
+  "mean_volume": 3290.650474430068,
+  "source": "UCI Metro Interstate Traffic Volume (492)",
+  "source_url": "https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume",
+  "scope": "Historical hourly westbound I-94 counts; not congestion, crash risk or live traffic.",
+  "analysis_scope": "Full cleaned historical dataset; predictive EDA and model choices use training only."
+}

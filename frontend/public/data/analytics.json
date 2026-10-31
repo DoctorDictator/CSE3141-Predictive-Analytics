@@ -1,0 +1,314 @@
+{
+  "hourly": [
+    {
+      "hour": 0,
+      "volume": 844.8543238537,
+      "count": 1723
+    },
+    {
+      "hour": 1,
+      "volume": 521.3187134503,
+      "count": 1710
+    },
+    {
+      "hour": 2,
+      "volume": 392.637006482,
+      "count": 1697
+    },
+    {
+      "hour": 3,
+      "volume": 373.2103055722,
+      "count": 1669
+    },
+    {
+      "hour": 4,
+      "volume": 701.3176746917,
+      "count": 1703
+    },
+    {
+      "hour": 5,
+      "volume": 2103.6670623145,
+      "count": 1685
+    },
+    {
+      "hour": 6,
+      "volume": 4172.0582293523,
+      "count": 1683
+    },
+    {
+      "hour": 7,
+      "volume": 4769.8313397129,
+      "count": 1672
+    },
+    {
+      "hour": 8,
+      "volume": 4593.5997631735,
+      "count": 1689
+    },
+    {
+      "hour": 9,
+      "volume": 4394.7785234899,
+      "count": 1639
+    },
+    {
+      "hour": 10,
+      "volume": 4204.8768328446,
+      "count": 1705
+    },
+    {
+      "hour": 11,
+      "volume": 4498.4589082184,
+      "count": 1667
+    },
+    {
+      "hour": 12,
+      "volume": 4739.1187943262,
+      "count": 1692
+    },
+    {
+      "hour": 13,
+      "volume": 4741.5780035864,
+      "count": 1673
+    },
+    {
+      "hour": 14,
+      "volume": 4957.0229817325,
+      "count": 1697
+    },
+    {
+      "hour": 15,
+      "volume": 5271.7378232111,
+      "count": 1663
+    },
+    {
+      "hour": 16,
+      "volume": 5708.6145284124,
+      "count": 1707
+    },
+    {
+      "hour": 17,
+      "volume": 5350.8305288462,
+      "count": 1664
+    },
+    {
+      "hour": 18,
+      "volume": 4306.4673008323,
+      "count": 1682
+    },
+    {
+      "hour": 19,
+      "volume": 3311.0213903743,
+      "count": 1683
+    },
+    {
+      "hour": 20,
+      "volume": 2869.7039204213,
+      "count": 1709
+    },
+    {
+      "hour": 21,
+      "volume": 2699.360915493,
+      "count": 1704
+    },
+    {
+      "hour": 22,
+      "volume": 2224.4188481675,
+      "count": 1719
+    },
+    {
+      "hour": 23,
+      "volume": 1490.7103448276,
+      "count": 1740
+    }
+  ],
+  "daily": [
+    {
+      "day_of_week": 0,
+      "volume": 3313.5606138989,
+      "count": 5799,
+      "day": "Mon"
+    },
+    {
+      "day_of_week": 1,
+      "volume": 3534.7171664036,
+      "count": 5703,
+      "day": "Tue"
+    },
+    {
+      "day_of_week": 2,
+      "volume": 3608.2760641048,
+      "count": 5803,
+      "day": "Wed"
+    },
+    {
+      "day_of_week": 3,
+      "volume": 3653.9146110057,
+      "count": 5797,
+      "day": "Thu"
+    },
+    {
+      "day_of_week": 4,
+      "volume": 3674.7776076229,
+      "count": 5877,
+      "day": "Fri"
+    },
+    {
+      "day_of_week": 5,
+      "volume": 2822.5646611342,
+      "count": 5784,
+      "day": "Sat"
+    },
+    {
+      "day_of_week": 6,
+      "volume": 2426.2494838266,
+      "count": 5812,
+      "day": "Sun"
+    }
+  ],
+  "weather": [
+    {
+      "weather": "Clear",
+      "volume": 3055.2547508604,
+      "count": 13366
+    },
+    {
+      "weather": "Clouds",
+      "volume": 3616.9882298486,
+      "count": 15123
+    },
+    {
+      "weather": "Drizzle",
+      "volume": 3159.8213592233,
+      "count": 515
+    },
+    {
+      "weather": "Fog",
+      "volume": 2724.4427860697,
+      "count": 201
+    },
+    {
+      "weather": "Haze",
+      "volume": 3597.9399477807,
+      "count": 766
+    },
+    {
+      "weather": "Mist",
+      "volume": 2854.2140762463,
+      "count": 3069
+    },
+    {
+      "weather": "Rain",
+      "volume": 3355.270287272,
+      "count": 4769
+    },
+    {
+      "weather": "Smoke",
+      "volume": 2559.6666666667,
+      "count": 15
+    },
+    {
+      "weather": "Snow",
+      "volume": 3001.8611232042,
+      "count": 2297
+    },
+    {
+      "weather": "Squall",
+      "volume": 420.0,
+      "count": 1
+    },
+    {
+      "weather": "Thunderstorm",
+      "volume": 2993.3664459161,
+      "count": 453
+    }
+  ],
+  "weekend": [
+    {
+      "is_weekend": 0,
+      "volume": 3557.4404568826,
+      "period": "Weekday"
+    },
+    {
+      "is_weekend": 1,
+      "volume": 2623.9285960676,
+      "period": "Weekend"
+    }
+  ],
+  "rain": [
+    {
+      "rain": "Dry",
+      "volume": 3288.7366111991,
+      "count": 38521
+    },
+    {
+      "rain": "0\u20131 mm",
+      "volume": 3444.5752808989,
+      "count": 1335
+    },
+    {
+      "rain": "1\u20135 mm",
+      "volume": 3156.595524957,
+      "count": 581
+    },
+    {
+      "rain": "5\u201320 mm",
+      "volume": 2952.3333333333,
+      "count": 126
+    },
+    {
+      "rain": "20+ mm",
+      "volume": 2353.0,
+      "count": 12
+    }
+  ],
+  "monthly": [
+    {
+      "month": 1,
+      "volume": 3060.2242703533
+    },
+    {
+      "month": 2,
+      "volume": 3230.793492268
+    },
+    {
+      "month": 3,
+      "volume": 3382.4633627242
+    },
+    {
+      "month": 4,
+      "volume": 3373.7424641498
+    },
+    {
+      "month": 5,
+      "volume": 3378.4071507761
+    },
+    {
+      "month": 6,
+      "volume": 3421.8820826953
+    },
+    {
+      "month": 7,
+      "volume": 3237.6950934579
+    },
+    {
+      "month": 8,
+      "volume": 3430.3238866397
+    },
+    {
+      "month": 9,
+      "volume": 3318.849272671
+    },
+    {
+      "month": 10,
+      "volume": 3388.03722334
+    },
+    {
+      "month": 11,
+      "volume": 3215.9410058027
+    },
+    {
+      "month": 12,
+      "volume": 3040.1944860653
+    }
+  ]
+}

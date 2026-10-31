@@ -1,0 +1,41 @@
+[
+  {
+    "input": {
+      "date_time": "2018-01-19T15:00:00",
+      "is_holiday": true,
+      "temp_c": 5.140000000000043,
+      "rain_1h": 0.0,
+      "snow_1h": 0.0,
+      "clouds_all": 75.0,
+      "weather_main": "Clouds"
+    },
+    "high_probability": 0.9069673374582374,
+    "prediction": 1
+  },
+  {
+    "input": {
+      "date_time": "2018-05-26T23:00:00",
+      "is_holiday": true,
+      "temp_c": 22.650000000000034,
+      "rain_1h": 0.0,
+      "snow_1h": 0.0,
+      "clouds_all": 1.0,
+      "weather_main": "Clear"
+    },
+    "high_probability": 0.0028730835797823938,
+    "prediction": 0
+  },
+  {
+    "input": {
+      "date_time": "2018-09-30T23:00:00",
+      "is_holiday": true,
+      "temp_c": 8.970000000000027,
+      "rain_1h": 0.0,
+      "snow_1h": 0.0,
+      "clouds_all": 90.0,
+      "weather_main": "Clouds"
+    },
+    "high_probability": 0.0002504943174306797,
+    "prediction": 0
+  }
+]
