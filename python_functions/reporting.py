@@ -1,9 +1,6 @@
-"""Package actual notebook results for the backend and dashboard."""
-
 from pathlib import Path
 import json
 import importlib.metadata
-import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
@@ -20,7 +17,6 @@ ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
 
 def evaluate(y, decision, probability):
-    """Calculate classification metrics from actual predictions."""
     return dict(
         accuracy=float(accuracy_score(y, decision)),
         precision=float(precision_score(y, decision, zero_division=0)),
@@ -31,15 +27,13 @@ def evaluate(y, decision, probability):
 
 
 def records(frame):
-    """Convert a small summary table into JSON-compatible records."""
     return json.loads(frame.to_json(orient="records"))
 
 
 def export_results(
     raw, df, parts, volume_threshold, model, tuning, results, coefficients
 ):
-    """Save the fitted pipeline and genuine dashboard results for FastAPI."""
-    train, valid, test = parts["train"], parts["validation"], parts["test"]
+    train, test = parts["train"], parts["test"]
     split_summary = [
         dict(
             partition=name,
@@ -50,22 +44,12 @@ def export_results(
         )
         for name, block in parts.items()
     ]
-    test_scores = results["test_scores"]
-    baseline = results["baseline"]
-    cm = results["cm"]
-    report = results["report"]
-    comparison = results["comparison"]
-    evaluation = results["evaluation"]
-    fpr = results["fpr"]
-    tpr = results["tpr"]
-    probability = results["probability"]
-    X_test = test[model.feature_names_in_]
     weather_categories = sorted(df.weather_main.dropna().unique().tolist())
     overview = dict(
         raw_observations=len(raw),
         unique_hours=len(df),
         training_hours=len(train),
-        validation_hours=len(valid),
+        validation_hours=len(parts["validation"]),
         test_hours=len(test),
         start=str(df.date_time.min()),
         end=str(df.date_time.max()),
@@ -122,15 +106,18 @@ def export_results(
         monthly=records(monthly),
     )
     metrics = dict(
-        test=test_scores,
-        baseline=baseline,
-        confusion_matrix=cm.tolist(),
-        classification_report=report,
-        comparison=records(comparison),
+        test=results["test_scores"],
+        baseline=results["baseline"],
+        confusion_matrix=results["cm"].tolist(),
+        classification_report=results["report"],
+        comparison=records(results["comparison"]),
         tuning=records(tuning),
-        evaluation=records(evaluation),
+        evaluation=records(results["evaluation"]),
         coefficients=records(coefficients),
-        roc=[dict(fpr=float(a), tpr=float(b)) for a, b in zip(fpr, tpr)],
+        roc=[
+            dict(fpr=float(a), tpr=float(b))
+            for a, b in zip(results["fpr"], results["tpr"])
+        ],
         split=split_summary,
         decision_threshold=0.5,
         volume_threshold=volume_threshold,
@@ -176,7 +163,6 @@ def export_results(
                 prediction=int(model.predict(frame)[0]),
             )
         )
-    joblib.dump(model, ARTIFACTS / "traffic_model.joblib")
     exports = dict(
         overview=overview,
         analytics=analytics,
@@ -186,15 +172,8 @@ def export_results(
     PUBLIC = ROOT / "frontend/public/data"
     PUBLIC.mkdir(parents=True, exist_ok=True)
     for name, value in exports.items():
-        (ARTIFACTS / (name + ".json")).write_text(
-            json.dumps(value, indent=2, allow_nan=False), encoding="utf-8"
-        )
+        content = json.dumps(value, indent=2, allow_nan=False)
+        (ARTIFACTS / (name + ".json")).write_text(content, encoding="utf-8")
         if name != "inference_examples":
-            (PUBLIC / (name + ".json")).write_text(
-                json.dumps(value, indent=2, allow_nan=False), encoding="utf-8"
-            )
-    assert np.allclose(
-        joblib.load(ARTIFACTS / "traffic_model.joblib").predict_proba(X_test)[:, 1],
-        probability,
-    )
-    print("Exported fitted pipeline, actual metrics, summaries and parity cases.")
+            (PUBLIC / (name + ".json")).write_text(content, encoding="utf-8")
+    print("Exported dashboard data.")

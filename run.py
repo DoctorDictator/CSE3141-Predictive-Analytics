@@ -1,5 +1,3 @@
-"""Start the TrafficRush API and website together: python run.py."""
-
 from pathlib import Path
 import json
 import shutil
@@ -14,7 +12,6 @@ WEBSITE = "http://127.0.0.1:5173/CSE3141-Predictive-Analytics/"
 
 
 def ready(url):
-    """Check our service, rather than assuming any process on the port is ours."""
     try:
         with urlopen(url, timeout=1) as response:
             body = response.read().decode("utf-8")
@@ -81,7 +78,6 @@ def main():
     except KeyboardInterrupt:
         print("\nStopping TrafficRush.")
     finally:
-        # Leave pre-existing services alone; stop only children this command owns.
         for process in started:
             if process.poll() is None:
                 process.terminate()

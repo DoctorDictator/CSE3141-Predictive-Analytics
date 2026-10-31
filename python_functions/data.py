@@ -1,5 +1,3 @@
-"""Download and cache the genuine UCI traffic dataset. No model training here."""
-
 from pathlib import Path
 import io
 import zipfile
@@ -12,7 +10,6 @@ DATA.mkdir(parents=True, exist_ok=True)
 
 
 def load_data():
-    """Download/cache UCI records while preserving the no-holiday label."""
     SOURCE = "https://archive.ics.uci.edu/static/public/492/metro%2Binterstate%2Btraffic%2Bvolume.zip"
     archive = DATA / "metro_interstate_traffic_volume.zip"
     if not archive.exists():
@@ -31,7 +28,6 @@ def load_data():
             ) from error
     with zipfile.ZipFile(archive) as bundle:
         member = next(name for name in bundle.namelist() if name.endswith(".csv.gz"))
-        # "None" is the dataset's real no-holiday label, not a missing value.
         raw = pd.read_csv(
             io.BytesIO(bundle.read(member)), compression="gzip", keep_default_na=False
         )

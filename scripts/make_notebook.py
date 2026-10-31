@@ -1,5 +1,3 @@
-"""Build the reference-style TrafficRush notebook; --execute saves real outputs."""
-
 from pathlib import Path
 import argparse
 import nbformat
@@ -10,12 +8,8 @@ CELLS = [
         "markdown",
         """
 # Traffic Analysis and Prediction
-## TrafficRush — Predicting High Traffic Conditions Using Machine Learning
-**CSE3141 · Manipal University Jaipur**
 
-Can time, weekdays, holidays and weather help classify a historical highway hour as **High** or **Normal Traffic**? Binary Logistic Regression predicts whether hourly volume reaches the training-period 70th percentile. A high count does not necessarily mean a jam, crash risk or live traffic.
-
-The supplied airline notebook was reinspected: 20 cells, including 11 code cells of 4–32 lines. This notebook follows its style: readable analysis, charts, preprocessing, training and metrics are written in the cells. Only reusable download and JSON-export work lives in `python_functions/`. The actual CSE3141 handout was reviewed; this project covers preparation, EDA, feature selection, Logistic Regression and chronological validation.
+Classify hourly traffic volume using calendar and weather data.
 """,
     ),
     (
@@ -28,7 +22,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
-from IPython.display import display, Markdown
+from IPython.display import display
 from sklearn.base import clone
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -55,8 +49,7 @@ thread_limit = threadpool_limits(limits=1)
     (
         "markdown",
         """
-### 1. Load and inspect the real data
-[UCI Metro Interstate Traffic Volume, dataset 492](https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume) records hourly westbound I-94 counts at Minnesota ATR station 301. Temperature is Kelvin, precipitation is mm/hour and cloud cover is percent. Dates are source local CST wall-clock labels; no UTC/DST conversion is guessed. The helper downloads the official ZIP once, validates its contents, caches it and loads its CSV. The loader preserves the literal holiday label `None`; it must not be parsed as a missing value.
+### 1. Load data
 """,
     ),
     (
@@ -75,10 +68,7 @@ raw.info()
     (
         "markdown",
         """
-### 2. Investigate duplicates, invalid measurements and outliers
-Repeated timestamps can contain multiple weather reports for the same hourly count. Quarantine hours whose counts disagree; otherwise retain the first source weather report without selecting by target value. This avoids overweighting repeated hours. The source's holiday marker is propagated within its calendar date because holiday is known calendar information, not a future traffic outcome.
-
-Zero Kelvin is physically invalid and becomes missing. Negative precipitation and invalid cloud percentages are also marked missing. Training-fit imputation will handle these values. IQR flags do not automatically delete unusual weather.
+### 2. Clean data
 """,
     ),
     (
@@ -93,7 +83,6 @@ conflicting_hours = hourly_counts[hourly_counts > 1].index
 print("Hours with conflicting volume:", len(conflicting_hours))
 df = df[~df.date_time.isin(conflicting_hours)]
 df = df.dropna(subset=["date_time", "traffic_volume"])
-# Calendar-day holiday information is independent of observed traffic counts.
 df["is_holiday"] = (
     df.holiday.ne("None").groupby(df.date_time.dt.date).transform("max").astype(int)
 )
@@ -124,15 +113,14 @@ display(flags.to_frame("IQR flags retained"))
 print("Largest rainfall measurements:", df.rain_1h.nlargest(3).tolist())
 print("Unique usable hours:", len(df))
 print("Coverage:", df.date_time.min(), "to", df.date_time.max())
-display(Markdown("**Decision:** retain nonnegative weather extremes, report their possible leverage, "
-                 "and learn imputation values from training only."))
 """,
     ),
     (
         "markdown",
         """
-### 3. Calendar features, chronological partitions and target
-Hour, weekday and month will be categorical, allowing nonmonotonic rush-hour patterns. Weekend is useful for EDA but redundant with weekday, so it is excluded from both models. Keep unique hours in chronological 70%/15%/15% partitions. Calculate the volume cutoff using training alone, then apply the same rule everywhere. Traffic volume, raw timestamp and weather_description never enter the predictor matrix.
+### 3. Features and chronological split
+
+Use 70% for training, 15% for validation and 15% for testing. High traffic means volume at or above the training 70th percentile.
 """,
     ),
     (
@@ -168,8 +156,7 @@ assert set(df.is_holiday.unique()) == {0, 1}
     (
         "markdown",
         """
-### 4. Exploratory analysis using training hours
-Purpose → inspect count distributions, calendar rhythms and weather associations → decide on manageable features. Use training behavior for research decisions; the final test remains held out. Charts are descriptive group summaries, not causal evidence.
+### 4. Explore training data
 """,
     ),
     (
@@ -186,8 +173,6 @@ axes[1].set(xlabel="Local hour", ylabel="Mean vehicles/hour",
             title="The daily traffic pattern", xticks=range(0, 24, 3))
 plt.tight_layout()
 plt.show()
-display(Markdown(f"**Observed:** the largest training mean occurs at {hourly_mean.idxmax():02d}:00. "
-                 "Encode hour categorically rather than assume volume increases linearly all day."))
 """,
     ),
     (
@@ -207,8 +192,6 @@ weekend_mean.plot.bar(ax=axes[2], rot=0)
 axes[2].set(title="Weekday versus weekend", ylabel="Vehicles/hour", xlabel="")
 plt.tight_layout()
 plt.show()
-display(Markdown("**Interpretation:** group means differ, but groups overlap in time and size. "
-                 "Compare weather with a controlled feature ablation rather than infer causality."))
 """,
     ),
     (
@@ -228,15 +211,12 @@ sns.heatmap(correlation, annot=True, fmt=".2f", cmap="vlag", center=0, ax=axes[2
 axes[2].set_title("Training numerical correlations")
 plt.tight_layout()
 plt.show()
-display(Markdown("**Decision:** weather is skewed and its simple correlations are limited. "
-                 "Retain the compact weather group for validation, alongside stronger calendar features."))
 """,
     ),
     (
         "markdown",
         """
-### 5. Preprocessing and the primary Logistic Regression pipeline
-As in the airline reference, construct the actual preprocessing and classifier below. Median imputation/scaling handles numeric inputs; most-frequent imputation and one-hot encoding handles categoricals. Unknown categories are ignored without refitting. Time + weather is the predeclared primary model; time only will be its research comparison. Numeric volume, raw date_time and detailed weather description are excluded.
+### 5. Preprocessing and logistic regression
 """,
     ),
     (
@@ -272,8 +252,7 @@ print("Primary predictors:", X_train.columns.tolist())
     (
         "markdown",
         """
-### 6. Train and tune with chronological validation
-Logistic Regression estimates p(High) using a sigmoid of the weighted encoded inputs. Classify High when p≥0.5. Smaller C gives stronger L2 shrinkage. Search C ∈ {0.1, 1, 10} using a predefined chronological validation fold and F1; this is not repeated random cross-validation. Disable automatic refitting on the combined pool so all learned preprocessing and coefficients stay training-fit. Test data never chooses C.
+### 6. Select C using validation F1
 """,
     ),
     (
@@ -305,8 +284,7 @@ print("Validation F1:", evaluate(y_valid, model.predict(X_valid),
     (
         "markdown",
         """
-### 7. Held-out test evaluation
-Freeze the fitted pipeline, then generate actual test predictions. Accuracy, precision, recall, F1 and ROC-AUC measure different aspects. The majority baseline supplies context. Ranking AUC does not establish calibrated probabilities. Validation is a model-selection estimate, while test is the final evaluation.
+### 7. Test evaluation
 """,
     ),
     (
@@ -353,15 +331,12 @@ axes[1].set(xlabel="False positive rate", ylabel="True positive rate", title="Fi
 axes[1].legend()
 plt.tight_layout()
 plt.show()
-display(Markdown(f"**Observed:** {cm[0,1]} false positives and {cm[1,0]} false negatives. "
-                 "The confusion matrix makes errors visible; no test result triggers retuning."))
 """,
     ),
     (
         "markdown",
         """
-### 8. Original experiment: does weather improve prediction?
-Train a second Logistic Regression using calendar information only, with identical partitions, C grid and validation criterion. Clone preprocessing components so fitting this model cannot mutate the primary pipeline. Compare actual validation and test F1/AUC. Preserve the primary time + weather model whether the difference is positive or negative.
+### 8. Compare calendar-only and weather models
 """,
     ),
     (
@@ -404,8 +379,7 @@ display(weather_gain.to_frame("weather minus time-only"))
     (
         "markdown",
         """
-### 9. Interpret coefficients and export the real trained model
-Inspect the actual fitted coefficients below. Numeric coefficients apply per training standard deviation; encoded category coefficients are regularized associations, not causal effects. Save the entire pipeline with Joblib. The reporting helper only packages already-computed results and descriptive JSON for FastAPI; it does not select features or train a separate model.
+### 9. Coefficients and export
 """,
     ),
     (
@@ -425,37 +399,26 @@ artifacts.mkdir(parents=True, exist_ok=True)
 joblib.dump(model, artifacts / "traffic_model.joblib")
 results = dict(test_scores=test_scores, baseline=baseline, cm=cm, report=report,
                comparison=comparison, evaluation=evaluation, fpr=fpr, tpr=tpr,
-               probability=probability)
+               )
 export_results(raw, df, parts, volume_threshold, model, tuning, results, coefficients)
 reloaded = joblib.load(artifacts / "traffic_model.joblib")
 assert np.allclose(reloaded.predict_proba(X_test)[:, 1], probability)
-print("Model reload verified; backend receives this same trained pipeline.")
+print("Model saved and verified.")
 """,
     ),
     (
         "markdown",
         """
-### 10. Conclusions, background and limitations
-Predictive analytics distinguishes descriptive patterns from unseen-hour classification. UCI supplies regression counts; this project creates a training-defined binary label. The held-out weather comparison asks whether detailed weather adds information beyond the calendar. A small measured gain is not proof of causality or statistical significance.
+### 10. Results
 
-The source covers one station in 2012–2018, not current road conditions or a network of highways. Repeated weather reports were reduced to one record per hour, losing detail. Missing hours, nonnegative weather extremes and invalid-temperature sentinels are limitations. Supplied same-hour weather is assumed available, not independently forecast. Adjacent hours are dependent; validation is reused for C selection; probabilities have no independent calibration study.
-
-Future work: additional stations/years, rolling-origin evaluation and a separate calibration block. No traffic-jam, collision or live-report claim is made.
-
-References: Hogue, J. (2019), [Metro Interstate Traffic Volume](https://doi.org/10.24432/C5X60B), UCI (CC BY 4.0); [scikit-learn Logistic Regression](https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html); the supplied CSE3141 handout and airline ZIP as course/style references.
+Historical data from one station (2012?2018). High volume does not necessarily mean congestion. Probabilities are not independently calibrated.
 """,
     ),
     (
         "code",
         """
-display(Markdown(
-    f"**Completed:** {len(raw):,} source records → {len(df):,} unique hours. "
-    f"High Traffic is ≥{volume_threshold:,.0f} vehicles/hour. "
-    f"Test accuracy **{test_scores['accuracy']:.2%}**, F1 **{test_scores['f1']:.3f}**, "
-    f"ROC-AUC **{test_scores['roc_auc']:.3f}**. "
-    f"Weather changes F1 by **{weather_gain.f1:+.3f}** and AUC by **{weather_gain.roc_auc:+.3f}**. "
-    "These are historical count-category estimates, not congestion or crash predictions."
-))
+display(pd.Series(test_scores, name="Test results"))
+display(weather_gain.to_frame("Weather improvement"))
 """,
     ),
 ]
