@@ -47,9 +47,18 @@ collection, preprocessing, missingness/outlier investigation, EDA, visualization
 feature engineering/selection, Binary Logistic Regression and validation topics.
 It does not add unrelated algorithms just to reproduce the entire syllabus.
 
-All downloading, cleaning, analysis, feature preparation, training, evaluation,
-research comparison and artifact-export Python stays inside the main notebook.
-The only application Python file, FastAPI's `backend/main.py`, serves frozen
+The implementation is now split into three straightforward Python files:
+
+- **`traffic_analysis.py`** ? readable functions for data loading, cleaning, plots,
+  training, evaluation and model export. It can also run as a normal Python script.
+- **`make_notebook.py`** ? creates the notebook with short function calls and academic
+  explanations; `--execute` runs every cell and saves real outputs.
+- **`run.py`** ? starts the backend and frontend together, reuses already-running
+  services, and stops only the services it started when you press Ctrl+C.
+
+The notebook keeps its explanations, charts and actual results, with only 23 lines
+of Python calls across its code cells. The original splits, label cutoff, fitted
+pipeline and exported metrics are unchanged. `backend/main.py` only serves frozen
 artifacts and never trains a model.
 
 - Download/cache the official UCI archive. If unavailable, save the official ZIP as
@@ -91,7 +100,29 @@ Launch at the repository root or inside `notebooks/`. The notebook exports model
 artifacts to `backend/artifacts/` and real saved dashboard JSON to
 `frontend/public/data/`.
 
-Start the API from the repository root:
+**Start the whole app with one command from the repository root:**
+
+```powershell
+.\.venv\Scripts\python run.py
+```
+
+Open **http://127.0.0.1:5173/CSE3141-Predictive-Analytics/**. Keep the command running;
+press Ctrl+C to stop its services. If frontend dependencies are not installed yet,
+run `npm ci` inside `frontend/` once. When using the existing Anaconda Python on this
+machine, `py -3.13 run.py` works too.
+
+**Regenerate and execute the short notebook:**
+
+```powershell
+.\.venv\Scripts\python make_notebook.py --execute
+```
+
+Running `make_notebook.py` without `--execute` creates the notebook without outputs;
+restart and run all cells in Jupyter afterward. To inspect or edit the analytical
+code, open `traffic_analysis.py`. `python traffic_analysis.py` runs the same analysis
+as a script (close each Matplotlib figure to proceed when using an interactive backend).
+
+For separate development terminals, start the API from the repository root:
 
 ```powershell
 .\.venv\Scripts\python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
@@ -169,6 +200,8 @@ the full real prediction workflow runs locally. Cold-start services may need a r
 ## Verification
 
 - Executed all 24 notebook cells and verified a fresh-kernel restart/run-all.
+- After moving the logic into Python functions, regenerated and executed the notebook;
+  all exported metrics exactly match the pre-refactor results.
 - Exported pipeline reload reproduces notebook test probabilities.
 - Four GET endpoints passed; three representative held-out inputs matched
   notebook/API class and probability to 1e-12.
@@ -205,7 +238,10 @@ stations/years, rolling-origin evaluation and an independent calibration block.
 ## Project structure
 
 ```text
-notebooks/Traffic_Analysis_and_Prediction.ipynb  # all ML and analytical Python
+traffic_analysis.py                           # readable analysis functions
+make_notebook.py                              # create/execute the short notebook
+run.py                                        # start the complete local app
+notebooks/Traffic_Analysis_and_Prediction.ipynb  # explanations, short calls and outputs
 backend/main.py                               # frozen-model serving only
 backend/artifacts/                            # model and actual exported results
 frontend/src/                                 # React dashboard and API client
