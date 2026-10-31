@@ -21,45 +21,50 @@ Celsius; precipitation is in millimetres/hour.
 
 | Final chronological test metric | Time + weather |
 |---|---:|
-| Accuracy | 92.84% |
-| Precision | 0.8849 |
-| Recall | 0.8885 |
-| F1 | 0.8867 |
-| ROC-AUC | 0.9770 |
+| Accuracy | 93.22% |
+| Precision | 0.8968 |
+| Recall | 0.8870 |
+| F1 | 0.8919 |
+| ROC-AUC | 0.9785 |
 
 Majority-class test accuracy: **68.46%**. The original experiment uses the same
 Logistic Regression algorithm, tuning opportunities and chronological partitions:
 
 | Feature group | Test F1 | Test ROC-AUC |
 |---|---:|---:|
-| Time only | 0.8835 | 0.9761 |
-| Time + weather | 0.8867 | 0.9770 |
+| Time only | 0.8905 | 0.9776 |
+| Time + weather | 0.8919 | 0.9785 |
 
-Weather adds a small improvement: **+0.0032 F1**, **+0.0009 AUC**. This is not a
+Weather adds a small improvement: **+0.0014 F1**, **+0.0010 AUC**. This is not a
 causal or statistical-significance claim. All numbers come from actual execution.
 
 ## Notebook and validation
 
-The **24-cell notebook** follows the straightforward pandas/scikit-learn style of
+The **26-cell notebook** follows the straightforward pandas/scikit-learn style of
 the supplied airline reference (20 cells), inspected before implementation.
 The actual CSE3141 handout was also reviewed. This project demonstrates its
 collection, preprocessing, missingness/outlier investigation, EDA, visualization,
 feature engineering/selection, Binary Logistic Regression and validation topics.
 It does not add unrelated algorithms just to reproduce the entire syllabus.
 
-The implementation is now split into three straightforward Python files:
+The notebook now follows the reference's balance: substantive code cells show data
+inspection/cleaning, time features, splits, plotting, preprocessing, model fitting,
+evaluation and interpretation. Code cells contain 8-32 lines, rather than one-line
+wrappers. The reference's 11 Python cells range from 4 to 32 lines; the extra cells
+here support chronological validation and the weather experiment.
 
-- **`traffic_analysis.py`** ? readable functions for data loading, cleaning, plots,
-  training, evaluation and model export. It can also run as a normal Python script.
-- **`make_notebook.py`** ? creates the notebook with short function calls and academic
-  explanations; `--execute` runs every cell and saves real outputs.
-- **`run.py`** ? starts the backend and frontend together, reuses already-running
-  services, and stops only the services it started when you press Ctrl+C.
+Reusable functions and utilities have clear folders:
 
-The notebook keeps its explanations, charts and actual results, with only 23 lines
-of Python calls across its code cells. The original splits, label cutoff, fitted
-pipeline and exported metrics are unchanged. `backend/main.py` only serves frozen
-artifacts and never trains a model.
+- **`python_functions/data.py`** - official download/cache helper.
+- **`python_functions/reporting.py`** - metric calculation and exported JSON packaging.
+- **`scripts/make_notebook.py`** - builds the notebook with readable code; use
+  `--execute` to run it and save actual outputs.
+- **`run.py`** - starts the frontend/backend together and stops only its own services.
+
+Preprocessing, Logistic Regression construction, Grid Search, fitting, test prediction,
+plots and Joblib saving remain visible in the notebook. `backend/main.py` only serves
+the frozen pipeline. The old one-line-wrapper notebook has been replaced in place,
+obsolete root helper scripts have been removed, and the old NearMiss checkpoint deleted.
 
 - Download/cache the official UCI archive. If unavailable, save the official ZIP as
   `data/raw/metro_interstate_traffic_volume.zip` and rerun.
@@ -69,7 +74,9 @@ artifacts and never trains a model.
 - Consistent repeated hours keep the first source weather record, without target-based
   ranking. Conflicting-volume hours would be quarantined. No missing hours are invented.
 - Holiday status is a known calendar-day property; source midnight markers are propagated
-  within the date. Weekend is omitted from predictors because weekday determines it.
+  within the date. The loader preserves the literal `None` no-holiday label instead
+  of interpreting it as a missing value. Both holiday and non-holiday hours are asserted.
+  Weekend is omitted from predictors because weekday determines it.
 - Chronological split: **28,402 training / 6,086 validation / 6,087 test hours**.
   Duplicate hours cannot enter different partitions. The volume cutoff uses training only.
 - Pipeline: training-fit median/most-frequent imputation, numeric scaling and categorical
@@ -111,16 +118,15 @@ press Ctrl+C to stop its services. If frontend dependencies are not installed ye
 run `npm ci` inside `frontend/` once. When using the existing Anaconda Python on this
 machine, `py -3.13 run.py` works too.
 
-**Regenerate and execute the short notebook:**
+**Regenerate and execute the reference-style notebook:**
 
 ```powershell
-.\.venv\Scripts\python make_notebook.py --execute
+.\.venv\Scripts\python scripts/make_notebook.py --execute
 ```
 
-Running `make_notebook.py` without `--execute` creates the notebook without outputs;
-restart and run all cells in Jupyter afterward. To inspect or edit the analytical
-code, open `traffic_analysis.py`. `python traffic_analysis.py` runs the same analysis
-as a script (close each Matplotlib figure to proceed when using an interactive backend).
+Running `scripts/make_notebook.py` without `--execute` creates a notebook without
+outputs; run all cells in Jupyter afterward. The academic code is directly in the
+notebook and its generator; reusable download/export helpers are in `python_functions/`.
 
 For separate development terminals, start the API from the repository root:
 
@@ -199,9 +205,9 @@ the full real prediction workflow runs locally. Cold-start services may need a r
 
 ## Verification
 
-- Executed all 24 notebook cells and verified a fresh-kernel restart/run-all.
-- After moving the logic into Python functions, regenerated and executed the notebook;
-  all exported metrics exactly match the pre-refactor results.
+- Executed all 26 revised notebook cells in a fresh kernel.
+- The no-holiday string parsing issue was corrected; published scores and artifacts
+  come from the corrected execution, rather than preserving the old constant holiday flag.
 - Exported pipeline reload reproduces notebook test probabilities.
 - Four GET endpoints passed; three representative held-out inputs matched
   notebook/API class and probability to 1e-12.
@@ -238,10 +244,11 @@ stations/years, rolling-origin evaluation and an independent calibration block.
 ## Project structure
 
 ```text
-traffic_analysis.py                           # readable analysis functions
-make_notebook.py                              # create/execute the short notebook
+python_functions/data.py                      # download/cache helper
+python_functions/reporting.py                 # real metric/export functions
+scripts/make_notebook.py                      # regenerate/execute reference-style cells
 run.py                                        # start the complete local app
-notebooks/Traffic_Analysis_and_Prediction.ipynb  # explanations, short calls and outputs
+notebooks/Traffic_Analysis_and_Prediction.ipynb  # substantive code, explanations and outputs
 backend/main.py                               # frozen-model serving only
 backend/artifacts/                            # model and actual exported results
 frontend/src/                                 # React dashboard and API client

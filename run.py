@@ -31,7 +31,7 @@ def main():
     if not node or not vite.exists():
         raise SystemExit("Install Node, then run npm ci inside frontend/.")
     if not (ROOT / "backend/artifacts/traffic_model.joblib").exists():
-        raise SystemExit("First run: python make_notebook.py --execute")
+        raise SystemExit("First run: python scripts/make_notebook.py --execute")
 
     services = [
         (
