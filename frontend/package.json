@@ -1,5 +1,5 @@
 {
-  "name": "trafficrush",
+  "name": "nearmiss",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -7,7 +7,8 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test:smoke": "node tests/smoke.mjs"
+    "test:smoke": "node tests/smoke.mjs",
+    "test": "node --test tests/simulation.test.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.475.0",

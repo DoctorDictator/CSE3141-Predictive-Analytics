@@ -1,1150 +1,1567 @@
-import { useEffect, useState } from "react";
-import { NavLink, Routes, Route, Link, useLocation } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Routes, Route } from "react-router-dom";
 import {
   Activity,
-  ArrowDownRight,
   ArrowRight,
-  ArrowUpRight,
   BarChart3,
-  CalendarDays,
-  Check,
+  Car,
+  ChevronLeft,
   ChevronRight,
-  CircleHelp,
-  CloudSun,
   Database,
-  ExternalLink,
   Gauge,
   GitBranch,
-  Layers3,
-  LoaderCircle,
-  Menu,
-  Route as RoadIcon,
-  ShieldCheck,
-  SlidersHorizontal,
-  Sparkles,
-  X,
+  Info,
+  Layers,
+  Pause,
+  Play,
+  Plus,
+  RotateCcw,
+  Scan,
+  Settings2,
+  ShieldAlert,
+  TrafficCone,
+  Trash2,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import {
-  AreaChart,
-  Area,
+  ResponsiveContainer,
   BarChart,
   Bar,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Line,
-  LineChart,
-  ReferenceLine,
-  ResponsiveContainer,
-  Tooltip,
   XAxis,
   YAxis,
+  Tooltip,
+  CartesianGrid,
+  ScatterChart,
+  Scatter,
 } from "recharts";
-import { API_URL, loadResearch, predictTraffic } from "./services/api";
+import {
+  createWorld,
+  generate,
+  saveInitial,
+  reset,
+  tick,
+  STEP,
+  LANE_WIDTH,
+  SCENARIOS,
+  leader,
+  brake,
+  changeLane,
+  setLanes,
+  loadScenario,
+  addCar,
+  rewind,
+  observations,
+  event,
+} from "./simulation";
+import { request, loadResearch } from "./services/api";
 
-const repo = "https://github.com/DoctorDictator/CSE3141-Predictive-Analytics";
-const navigation = [
-  ["/", "Overview", Layers3],
-  ["/analysis", "Traffic analysis", BarChart3],
-  ["/prediction", "Predict traffic", SlidersHorizontal],
-  ["/performance", "Model performance", Activity],
-  ["/about", "About the project", CircleHelp],
-];
-const number = (value) =>
-  Number(value).toLocaleString("en-US", { maximumFractionDigits: 0 });
-const percent = (value) => `${(Number(value) * 100).toFixed(1)}%`;
-const tooltipStyle = {
-  borderRadius: 12,
-  border: "1px solid #e2e7df",
-  fontSize: 12,
-  boxShadow: "0 8px 30px #163a3010",
-};
-
-function Chart({
-  data,
-  x,
-  bar = false,
-  color = "#208777",
-  reference,
-  value = "volume",
-}) {
-  const Container = bar ? BarChart : AreaChart;
+const pct = (x) => `${(x * 100).toFixed(1)}%`;
+const num = (x) => Number(x).toLocaleString("en-US");
+function Button({ children, icon: Icon, ...props }) {
   return (
-    <ResponsiveContainer width="100%" height="100%">
-      <Container
-        data={data}
-        margin={{ top: 15, right: 12, left: -16, bottom: 5 }}
-      >
-        <defs>
-          <linearGradient id="volumeFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.2} />
-            <stop offset="100%" stopColor={color} stopOpacity={0.01} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid
-          vertical={false}
-          stroke="#e8ece6"
-          strokeDasharray="3 4"
-        />
-        <XAxis
-          dataKey={x}
-          tickLine={false}
-          axisLine={false}
-          tick={{ fontSize: 11, fill: "#778278" }}
-          minTickGap={20}
-        />
-        <YAxis
-          tickLine={false}
-          axisLine={false}
-          tick={{ fontSize: 11, fill: "#778278" }}
-        />
-        <Tooltip
-          contentStyle={tooltipStyle}
-          formatter={(v) => [number(v), "Mean vehicles / hour"]}
-        />
-        {reference && (
-          <ReferenceLine y={reference} stroke="#d6a340" strokeDasharray="5 5" />
-        )}
-        {bar ? (
-          <Bar
-            isAnimationActive={false}
-            dataKey={value}
-            fill={color}
-            radius={[5, 5, 0, 0]}
-            maxBarSize={42}
-          />
-        ) : (
-          <Area
-            isAnimationActive={false}
-            type="monotone"
-            dataKey={value}
-            stroke={color}
-            strokeWidth={2.5}
-            fill="url(#volumeFill)"
-          />
-        )}
-      </Container>
-    </ResponsiveContainer>
+    <button {...props}>
+      {Icon && <Icon size={15} />} {children}
+    </button>
   );
 }
-
-function Panel({ title, subtitle, children, aside, className = "" }) {
+function Field({ label, children }) {
   return (
-    <section className={`panel ${className}`}>
-      <div className="panel-heading">
-        <div>
-          <h2>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
-        </div>
-        {aside}
-      </div>
+    <label className="field">
+      <span>{label}</span>
       {children}
-    </section>
+    </label>
   );
 }
-function Metric({ label, value, note, icon: Icon = Gauge, accent }) {
+function Stat({ label, value, note }) {
   return (
-    <article className={`metric ${accent ? "accent" : ""}`}>
-      <div className="metric-top">
-        <span>{label}</span>
-        <Icon size={18} />
-      </div>
+    <div className="stat">
+      <span>{label}</span>
       <strong>{value}</strong>
-      <p>{note}</p>
-    </article>
-  );
-}
-function Heading({ eyebrow, title, description, children }) {
-  return (
-    <header className="page-heading">
-      <div>
-        <span className="eyebrow">{eyebrow}</span>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
-      {children}
-    </header>
-  );
-}
-function Highway({ high = false, muted = false }) {
-  return (
-    <div className={`highway ${muted ? "muted" : ""}`} aria-hidden="true">
-      <span className="road-mark road-mark-a" />
-      <span className="road-mark road-mark-b" />
-      {Array.from({ length: high ? 9 : 4 }, (_, i) => (
-        <span
-          key={i}
-          className={`car car-${i % 3}`}
-          style={{
-            left: `${12 + ((i * 19) % 75)}%`,
-            top: `${21 + (i % 3) * 25}%`,
-          }}
-        />
-      ))}
-      <span className="illustration-label">Illustration only</span>
+      {note && <small>{note}</small>}
     </div>
   );
 }
-
-function Overview({ overview: o, analytics: a, metrics: m }) {
-  return (
-    <>
-      <Heading
-        eyebrow="THE BIG PICTURE"
-        title="Traffic, in perspective."
-        description="Explore historical I-94 patterns. Put busy hours into context."
-      >
-        <Link className="button primary" to="/prediction">
-          <Sparkles size={16} /> Predict traffic <ArrowRight size={16} />
-        </Link>
-      </Heading>
-      <div className="metrics-grid">
-        <Metric
-          icon={Database}
-          label="Recorded observations"
-          value={number(o.raw_observations)}
-          note={`${number(o.unique_hours)} unique hours after cleaning`}
-        />
-        <Metric
-          icon={CalendarDays}
-          label="Historical coverage"
-          value="2012–2018"
-          note="One westbound I-94 traffic station"
-        />
-        <Metric
-          icon={Gauge}
-          label="High-volume hours"
-          value={`${o.high_percent.toFixed(1)}%`}
-          note={`At least ${number(o.volume_threshold)} vehicles / hour`}
-          accent
-        />
-        <Metric
-          icon={ShieldCheck}
-          label="Test accuracy"
-          value={percent(m.test.accuracy)}
-          note="On the final chronological holdout"
-        />
-      </div>
-      <div className="main-grid">
-        <Panel
-          title="The rhythm of a day"
-          subtitle="Mean historical traffic volume by local hour"
-          aside={<span className="tag">All unique hours</span>}
-        >
-          <div className="chart large">
-            <Chart data={a.hourly} x="hour" reference={o.volume_threshold} />
-          </div>
-          <div className="chart-caption">
-            <span>
-              <i className="dot teal" /> Mean hourly volume
-            </span>
-            <span>
-              <i className="dash" /> High Traffic cutoff ·{" "}
-              {number(o.volume_threshold)}
-            </span>
-          </div>
-        </Panel>
-        <section className="scenario-card">
-          <span className="small-label">
-            <Sparkles size={14} /> CONDITIONS → CONTEXT
-          </span>
-          <h2>
-            Every hour has
-            <br />a different story.
-          </h2>
-          <p>
-            Explore how a time, a day and the weather relate to historical
-            traffic volume.
-          </p>
-          <Highway />
-          <Link to="/prediction" className="button light">
-            Explore a scenario <ArrowRight size={17} />
-          </Link>
-          <span className="scenario-note">
-            An estimate from a trained model.
-            <br />A live traffic report is not available.
-          </span>
-        </section>
-      </div>
-      <div className="secondary-grid">
-        <Panel title="The weekly pattern" subtitle="Average vehicles per hour">
-          <div className="chart">
-            <Chart data={a.daily} x="day" bar />
-          </div>
-        </Panel>
-        <Panel
-          title="Weather in the picture"
-          subtitle="Historical means; not causal effects"
-        >
-          <div className="chart">
-            <Chart data={a.weather} x="weather" bar color="#b5aa72" />
-          </div>
-        </Panel>
-        <Panel
-          title="What does “High” mean?"
-          subtitle="A transparent historical definition"
-          className="definition-card"
-        >
-          <div className="threshold-value">
-            {number(o.volume_threshold)}
-            <span>vehicles / hour</span>
-          </div>
-          <p>
-            The 70th percentile of training-period volume. This same cutoff
-            defines every label and prediction.
-          </p>
-          <div className="notice compact">
-            <CircleHelp size={17} />
-            <span>High volume does not necessarily mean congestion.</span>
-          </div>
-          <Link to="/about" className="text-link">
-            Understand the model <ArrowRight size={14} />
-          </Link>
-        </Panel>
-      </div>
-      <div className="source-line">
-        <Database size={14} />
-        <span>
-          UCI Metro Interstate Traffic Volume · ATR station 301 ·
-          Minneapolis–Saint Paul
-        </span>
-        <a href={o.source_url} target="_blank" rel="noreferrer">
-          View source <ExternalLink size={12} />
-        </a>
-      </div>
-    </>
-  );
-}
-
-function Analysis({ analytics: a }) {
-  return (
-    <>
-      <Heading
-        eyebrow="EXPLORE THE RECORD"
-        title="Patterns behind the numbers."
-        description="Descriptive summaries of unique historical hours, exported by the notebook."
-      />
-      <div className="analysis-grid">
-        <Panel title="Hour of day" subtitle="Local hour · mean vehicles / hour">
-          <div className="chart large">
-            <Chart data={a.hourly} x="hour" />
-          </div>
-        </Panel>
-        <Panel
-          title="Day of week"
-          subtitle="Daily mean · unequal numbers of observed hours"
-        >
-          <div className="chart large">
-            <Chart data={a.daily} x="day" bar />
-          </div>
-        </Panel>
-        <Panel
-          title="Weather conditions"
-          subtitle="Unadjusted group means, not weather effects"
-        >
-          <div className="chart large">
-            <Chart data={a.weather} x="weather" bar color="#b5aa72" />
-          </div>
-        </Panel>
-        <Panel
-          title="Rainfall and volume"
-          subtitle="Hourly precipitation in millimetres"
-        >
-          <div className="chart large">
-            <Chart data={a.rain} x="rain" bar />
-          </div>
-        </Panel>
-        <Panel title="Weekday or weekend?" subtitle="A descriptive comparison">
-          <div className="chart">
-            <Chart data={a.weekend} x="period" bar color="#b5aa72" />
-          </div>
-        </Panel>
-        <Panel
-          title="Across the seasons"
-          subtitle="Month 1–12 · mean vehicles / hour"
-        >
-          <div className="chart">
-            <Chart data={a.monthly} x="month" />
-          </div>
-        </Panel>
-      </div>
-      <div className="notice">
-        <CircleHelp size={19} />
-        <p>
-          Weather and calendar groups overlap. These summaries describe the
-          records; the controlled time-only versus time-and-weather experiment
-          is on the Model Performance page.
-        </p>
-      </div>
-    </>
-  );
-}
-
-function Prediction({ metrics: m, overview: o }) {
-  const [form, setForm] = useState({
-    date: "2018-09-28",
-    hour: "17",
-    is_holiday: false,
-    temp_c: "18",
-    rain_1h: "0",
-    snow_1h: "0",
-    clouds_all: "30",
-    weather_main: "Clear",
+function useResearch(name) {
+  const [state, set] = useState({
+    data: null,
+    source: "Loading notebook exports…",
   });
-  const [result, setResult] = useState(null),
-    [error, setError] = useState(""),
-    [busy, setBusy] = useState(false);
-  const update = (name, value) => {
-    setForm((previous) => ({ ...previous, [name]: value }));
-    setError("");
-    setResult(null);
-  };
-  const date = new Date(`${form.date}T12:00:00`);
-  async function submit(event) {
-    event.preventDefault();
-    setError("");
-    setResult(null);
-    setBusy(true);
-    try {
-      setResult(
-        await predictTraffic({
-          date_time: `${form.date}T${form.hour.padStart(2, "0")}:00:00`,
-          is_holiday: form.is_holiday,
-          temp_c: Number(form.temp_c),
-          rain_1h: Number(form.rain_1h),
-          snow_1h: Number(form.snow_1h),
-          clouds_all: Number(form.clouds_all),
-          weather_main: form.weather_main,
-        }),
-      );
-    } catch (problem) {
-      setError(
-        problem.message ||
-          "The prediction service could not be reached. Start the backend and try again.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <>
-      <Heading
-        eyebrow="YOUR CONDITIONS, THE MODEL’S ESTIMATE"
-        title="What does this hour look like?"
-        description="Choose a scenario. Get an estimate from the actual trained Logistic Regression model."
-      />
-      {!API_URL && (
-        <div className="notice warning">
-          <CircleHelp size={20} />
-          <p>
-            Historical analysis is available. Live model inference requires the
-            separately hosted FastAPI service, which has not been configured for
-            this site.{" "}
-            <a href={`${repo}#local-setup`} target="_blank" rel="noreferrer">
-              Run locally
-            </a>{" "}
-            to use predictions.
-          </p>
-        </div>
-      )}
-      <div className="prediction-grid">
-        <Panel
-          title="Set the scene"
-          subtitle="Use the local date and hour for the Minnesota dataset"
-        >
-          <form onSubmit={submit} className="prediction-form">
-            <div className="form-section-label">
-              <CalendarDays size={16} /> TIME & CALENDAR
-            </div>
-            <div className="field-row">
-              <label>
-                Date
-                <input
-                  name="date"
-                  type="date"
-                  value={form.date}
-                  min="2012-01-01"
-                  max="2100-12-31"
-                  required
-                  onChange={(e) => update("date", e.target.value)}
-                />
-              </label>
-              <label>
-                Local hour
-                <select
-                  name="hour"
-                  value={form.hour}
-                  onChange={(e) => update("hour", e.target.value)}
-                >
-                  {Array.from({ length: 24 }, (_, i) => (
-                    <option key={i} value={i}>
-                      {String(i).padStart(2, "0")}:00
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="derived-fields">
-              {Number.isNaN(date.getTime())
-                ? "Choose a date"
-                : date.toLocaleDateString("en-US", {
-                    weekday: "long",
-                    month: "long",
-                    day: "numeric",
-                  })}
-              <span>Weekday and month are derived automatically</span>
-            </div>
-            <label className="check-field">
-              <input
-                name="is_holiday"
-                type="checkbox"
-                checked={form.is_holiday}
-                onChange={(e) => update("is_holiday", e.target.checked)}
-              />
-              <span>This date is a holiday</span>
-            </label>
-            <div className="form-section-label weather-label">
-              <CloudSun size={16} /> WEATHER CONDITIONS
-            </div>
-            <div className="field-row">
-              <label>
-                Temperature <span>°C</span>
-                <input
-                  name="temp_c"
-                  type="number"
-                  min="-60"
-                  max="60"
-                  step="0.1"
-                  required
-                  value={form.temp_c}
-                  onChange={(e) => update("temp_c", e.target.value)}
-                />
-              </label>
-              <label>
-                Main condition
-                <select
-                  name="weather_main"
-                  value={form.weather_main}
-                  onChange={(e) => update("weather_main", e.target.value)}
-                >
-                  {m.weather_categories.map((weather) => (
-                    <option key={weather}>{weather}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="field-row">
-              <label>
-                Rainfall <span>mm / hour</span>
-                <input
-                  name="rain_1h"
-                  type="number"
-                  min="0"
-                  max="1000"
-                  step="0.1"
-                  required
-                  value={form.rain_1h}
-                  onChange={(e) => update("rain_1h", e.target.value)}
-                />
-              </label>
-              <label>
-                Snowfall <span>mm / hour</span>
-                <input
-                  name="snow_1h"
-                  type="number"
-                  min="0"
-                  max="1000"
-                  step="0.1"
-                  required
-                  value={form.snow_1h}
-                  onChange={(e) => update("snow_1h", e.target.value)}
-                />
-              </label>
-            </div>
-            <label className="cloud-label">
-              Cloud coverage <output>{form.clouds_all}%</output>
-              <input
-                name="clouds_all"
-                type="range"
-                min="0"
-                max="100"
-                value={form.clouds_all}
-                onChange={(e) => update("clouds_all", e.target.value)}
-              />
-            </label>
-            <div className="range-labels">
-              <span>Clear sky</span>
-              <span>Overcast</span>
-            </div>
-            {error && (
-              <div className="error-message" role="alert">
-                {error}
-              </div>
-            )}
-            <button
-              className="button primary full-width"
-              type="submit"
-              disabled={busy}
-            >
-              {busy ? (
-                <LoaderCircle className="spin" size={17} />
-              ) : (
-                <Sparkles size={17} />
-              )}{" "}
-              {busy ? "Calculating estimate…" : "Predict Traffic"}{" "}
-              <ArrowRight size={16} />
-            </button>
-            <p className="form-footnote">
-              No live location or traffic feed is used.
-            </p>
-          </form>
-        </Panel>
-        <div className="prediction-side">
-          <section
-            className={`result-card ${result ? "has-result" : ""}`}
-            aria-live="polite"
-          >
-            <span className="small-label">
-              {result ? "MODEL RESULT" : "THE ROAD AHEAD"}
-            </span>
-            {result ? (
-              <>
-                <span
-                  className={`result-tag ${result.prediction ? "high" : ""}`}
-                >
-                  <span className="dot" />
-                  {result.category}
-                </span>
-                <div className="probability-value">
-                  {percent(result.high_probability)}
-                  <span>estimated High Traffic probability</span>
-                </div>
-                <div className="probability-track">
-                  <span
-                    style={{ width: `${result.high_probability * 100}%` }}
-                  />
-                </div>
-                <div className="probability-labels">
-                  <span>Normal {percent(result.normal_probability)}</span>
-                  <span>High {percent(result.high_probability)}</span>
-                </div>
-                <Highway high={result.prediction === 1} />
-                <div className="result-explanation">
-                  <h3>What this means</h3>
-                  <p>
-                    The estimated probability that hourly volume meets or
-                    exceeds {number(result.volume_threshold)} vehicles, given
-                    these conditions.
-                  </p>
-                  <div className="result-inputs">
-                    <span>{result.inputs.date_time.replace("T", " · ")}</span>
-                    <span>
-                      {result.inputs.temp_c}°C · {result.inputs.weather_main}
-                    </span>
-                  </div>
-                  {result.extrapolation && (
-                    <p className="extrapolation">
-                      This date is outside the 2012–2018 training source.
-                      Historical patterns may have changed.
-                    </p>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <h2>
-                  A little context.
-                  <br />A clearer estimate.
-                </h2>
-                <p>
-                  Set the conditions and we’ll let the trained model do the
-                  calculating.
-                </p>
-                <Highway muted />
-                <div className="empty-result">
-                  <Gauge size={25} />
-                  <span>Your result will appear here</span>
-                  <small>Real model output. No simulated probabilities.</small>
-                </div>
-              </>
-            )}
-          </section>
-          <div className="notice">
-            <ShieldCheck size={20} />
-            <p>
-              “High Traffic” is a volume category. It does not indicate a
-              traffic jam or crash risk. The model uses historical data, not
-              live road conditions.
-            </p>
-          </div>
-          <div className="mini-method">
-            <span>THE SAME MODEL, END TO END</span>
-            <p>Notebook-trained pipeline → FastAPI → your estimate</p>
-            <span className="tag">
-              Cutoff · {number(o.volume_threshold)} vehicles / hour
-            </span>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function Performance({ metrics: m }) {
-  const coefficients = m.coefficients
-    .slice(0, 12)
-    .map((c) => ({ ...c, feature: c.feature.replace(/^(cat|num)__/, "") }));
-  const comparisons = m.comparison
-    .filter((row) => row.partition === "test")
-    .map((row) => ({
-      ...row,
-      name: row.model === "time_only" ? "Time only" : "Time + weather",
-    }));
-  return (
-    <>
-      <Heading
-        eyebrow="EVIDENCE OVER ASSUMPTION"
-        title="How well does it hold up?"
-        description="Genuine notebook results from the final chronological test period."
-      />
-      <div className="metrics-grid five">
-        {[
-          ["Accuracy", m.test.accuracy],
-          ["Precision", m.test.precision],
-          ["Recall", m.test.recall],
-          ["F1 score", m.test.f1],
-          ["ROC-AUC", m.test.roc_auc],
-        ].map(([label, value]) => (
-          <Metric
-            key={label}
-            label={label}
-            value={label === "ROC-AUC" ? value.toFixed(3) : percent(value)}
-            note="Time + weather · held-out test"
-          />
-        ))}
-      </div>
-      <div className="analysis-grid">
-        <Panel
-          title="Where predictions land"
-          subtitle="Actual rows × predicted columns"
-        >
-          <div className="confusion">
-            <div />
-            <span>Predicted Normal</span>
-            <span>Predicted High</span>
-            <span>Actual Normal</span>
-            <strong className="cm-good">
-              {number(m.confusion_matrix[0][0])}
-              <small>True negative</small>
-            </strong>
-            <strong>
-              {number(m.confusion_matrix[0][1])}
-              <small>False positive</small>
-            </strong>
-            <span>Actual High</span>
-            <strong>
-              {number(m.confusion_matrix[1][0])}
-              <small>False negative</small>
-            </strong>
-            <strong className="cm-good">
-              {number(m.confusion_matrix[1][1])}
-              <small>True positive</small>
-            </strong>
-          </div>
-        </Panel>
-        <Panel
-          title="Discrimination across thresholds"
-          subtitle="ROC curve · chance reference shown dashed"
-        >
-          <div className="chart large">
-            <ResponsiveContainer>
-              <LineChart
-                data={m.roc}
-                margin={{ left: -12, right: 15, bottom: 10 }}
-              >
-                <CartesianGrid strokeDasharray="3 4" />
-                <XAxis
-                  dataKey="fpr"
-                  type="number"
-                  domain={[0, 1]}
-                  tick={{ fontSize: 11 }}
-                />
-                <YAxis domain={[0, 1]} tick={{ fontSize: 11 }} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Line
-                  dataKey="tpr"
-                  stroke="#208777"
-                  strokeWidth={2}
-                  dot={false}
-                />
-                <ReferenceLine
-                  segment={[
-                    { x: 0, y: 0 },
-                    { x: 1, y: 1 },
-                  ]}
-                  stroke="#b9c2b8"
-                  strokeDasharray="4 4"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="panel-footnote">
-            X: false positive rate · Y: true positive rate
-          </p>
-        </Panel>
-        <Panel
-          title="Does weather add useful information?"
-          subtitle="Identical test hours and algorithm; different feature groups"
-        >
-          <div className="chart large">
-            <ResponsiveContainer>
-              <BarChart data={comparisons} margin={{ left: -25 }}>
-                <CartesianGrid vertical={false} strokeDasharray="3 4" />
-                <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                <YAxis domain={[0, 1]} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend />
-                <Bar
-                  dataKey="f1"
-                  name="F1 score"
-                  fill="#208777"
-                  radius={[4, 4, 0, 0]}
-                />
-                <Bar
-                  dataKey="roc_auc"
-                  name="ROC-AUC"
-                  fill="#c5b97f"
-                  radius={[4, 4, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-          <p className="panel-footnote">
-            The primary model remains time + weather; differences are reported
-            without test retuning.
-          </p>
-        </Panel>
-        <Panel
-          title="What the model associates with High Traffic"
-          subtitle="Largest encoded/standardized coefficients; not causal importance"
-        >
-          <div className="chart coefficient-chart">
-            <ResponsiveContainer>
-              <BarChart
-                data={coefficients}
-                layout="vertical"
-                margin={{ left: 65, right: 20 }}
-              >
-                <CartesianGrid horizontal={false} strokeDasharray="3 4" />
-                <XAxis type="number" tick={{ fontSize: 10 }} />
-                <YAxis
-                  dataKey="feature"
-                  type="category"
-                  width={90}
-                  tick={{ fontSize: 10 }}
-                />
-                <Tooltip contentStyle={tooltipStyle} />
-                <ReferenceLine x={0} stroke="#8a9588" />
-                <Bar dataKey="coefficient">
-                  {coefficients.map((c, i) => (
-                    <Cell
-                      key={i}
-                      fill={c.coefficient >= 0 ? "#208777" : "#c5b97f"}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Panel>
-      </div>
-      <div className="validation-strip">
-        <GitBranch size={21} />
-        <div>
-          <h3>Chronology matters.</h3>
-          <p>
-            Training → validation → testing. Unique hours stay in one partition.
-            The volume cutoff and preprocessing are fitted with training data
-            only. Validation selects regularization; the final test does not
-            tune it.
-          </p>
-        </div>
-        <span className="tag">
-          Majority baseline accuracy · {percent(m.baseline.accuracy)}
-        </span>
-      </div>
-    </>
-  );
-}
-
-function About({ overview: o, metrics: m }) {
-  return (
-    <>
-      <Heading
-        eyebrow="CSE3141 · PREDICTIVE ANALYTICS"
-        title="A simple model. A transparent story."
-        description="Traffic Analysis and Prediction — an academic project at Manipal University Jaipur."
-      />
-      <div className="about-grid">
-        <Panel title="The question" subtitle="TrafficRush">
-          <p className="about-lead">
-            Can weather, time of day, weekday and holidays help identify
-            high-volume highway hours?
-          </p>
-          <p>
-            We use the real UCI Metro Interstate Traffic Volume dataset:
-            historical hourly westbound I-94 counts at station 301 near
-            Minneapolis–Saint Paul. High Traffic is defined as at least{" "}
-            <strong>{number(o.volume_threshold)} vehicles per hour</strong>, the
-            training-period 70th percentile.
-          </p>
-          <div className="about-links">
-            <a href={o.source_url} target="_blank" rel="noreferrer">
-              UCI dataset <ExternalLink size={14} />
-            </a>
-            <a
-              href={`${repo}/blob/main/notebooks/Traffic_Analysis_and_Prediction.ipynb`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Executed notebook <ExternalLink size={14} />
-            </a>
-            <a href={repo} target="_blank" rel="noreferrer">
-              GitHub repository <ExternalLink size={14} />
-            </a>
-          </div>
-        </Panel>
-        <Panel title="From records to a result">
-          <ol className="workflow">
-            {[
-              [
-                "Collect & understand",
-                "Official UCI download, missingness, repeated hours and unusual weather.",
-              ],
-              [
-                "Explore & prepare",
-                "Descriptive plots, calendar features and chronological partitions.",
-              ],
-              [
-                "Train & validate",
-                "Binary Logistic Regression with training-fit imputation, scaling and encoding.",
-              ],
-              [
-                "Evaluate & serve",
-                "Held-out metrics, a weather ablation and the same fitted pipeline in FastAPI.",
-              ],
-            ].map(([title, body], i) => (
-              <li key={title}>
-                <span>{i + 1}</span>
-                <div>
-                  <h3>{title}</h3>
-                  <p>{body}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </Panel>
-        <Panel title="What goes into the model">
-          <div className="feature-tags">
-            {m.features.map((f) => (
-              <span key={f}>{f.replaceAll("_", " ")}</span>
-            ))}
-          </div>
-          <p className="panel-footnote">
-            Weekend is omitted as a predictor because weekday determines it.
-            Weather description and observed traffic volume are not input
-            features.
-          </p>
-        </Panel>
-        <Panel title="Know the boundaries">
-          <ul className="limitations">
-            <li>
-              One westbound station and 2012–2018 conditions limit transfer to
-              other roads and years.
-            </li>
-            <li>
-              High vehicle count is not necessarily congestion, a crash risk, or
-              a live traffic condition.
-            </li>
-            <li>
-              Unusual weather readings and missing hours remain dataset
-              limitations.
-            </li>
-            <li>
-              Observational associations are not causal effects. Probabilities
-              have not been independently calibrated.
-            </li>
-            <li>
-              The actual CSE3141 handout was reviewed; this project focuses on
-              preparation, EDA, feature selection, Logistic Regression and
-              validation.
-            </li>
-          </ul>
-        </Panel>
-      </div>
-      <div className="source-line">
-        <Database size={14} />
-        <span>
-          Hogue, J. (2019). Metro Interstate Traffic Volume. UCI · CC BY 4.0.
-        </span>
-        <a
-          href="https://doi.org/10.24432/C5X60B"
-          target="_blank"
-          rel="noreferrer"
-        >
-          Dataset citation <ExternalLink size={12} />
-        </a>
-      </div>
-    </>
-  );
-}
-
-export default function App() {
-  const [research, setResearch] = useState(null),
-    [error, setError] = useState(""),
-    [open, setOpen] = useState(false);
-  const location = useLocation();
   useEffect(() => {
     let active = true;
-    loadResearch()
-      .then((value) => {
-        if (active) setResearch(value);
-      })
-      .catch((problem) => {
-        if (active) setError(problem.message);
-      });
+    loadResearch(name)
+      .then((value) => active && set(value))
+      .catch((e) => active && set({ data: null, source: e.message }));
     return () => {
       active = false;
     };
+  }, [name]);
+  return state;
+}
+
+function Simulator() {
+  const world = useRef(null);
+  if (!world.current) {
+    world.current = createWorld();
+    loadScenario(world.current, SCENARIOS[0]);
+  }
+  const w = world.current,
+    [running, setRunning] = useState(false),
+    runRef = useRef(false),
+    [version, render] = useState(0);
+  const [count, setCount] = useState(6),
+    [seed, setSeed] = useState("42"),
+    [scenario, setScenario] = useState(SCENARIOS[0]);
+  const [selected, select] = useState(1),
+    [rate, setRate] = useState(1),
+    rateRef = useRef(1);
+  const [camera, setCamera] = useState("fit"),
+    [zoom, setZoom] = useState(1),
+    [pan, setPan] = useState(0);
+  const [scores, setScores] = useState({}),
+    [apiStatus, setApiStatus] = useState("Connecting to model…");
+  const generation = useRef(0),
+    scoreRef = useRef({}),
+    lastElevated = useRef(new Set());
+  const update = () => render((v) => v + 1);
+  const clearScores = () => {
+    generation.current++;
+    scoreRef.current = {};
+    lastElevated.current = new Set();
+    setScores({});
+  };
+  const mutate = (fn) => {
+    fn();
+    w.epoch++;
+    clearScores();
+    update();
+  };
+  useEffect(() => {
+    runRef.current = running;
+  }, [running]);
+  useEffect(() => {
+    rateRef.current = rate;
+  }, [rate]);
+  useEffect(() => {
+    let frame,
+      previous = performance.now(),
+      accumulator = 0,
+      lastDraw = 0;
+    const animate = (now) => {
+      const elapsed = Math.min(0.1, (now - previous) / 1000);
+      previous = now;
+      if (runRef.current) {
+        accumulator += elapsed * rateRef.current;
+        while (accumulator >= STEP) {
+          tick(world.current, STEP);
+          accumulator -= STEP;
+        }
+      } else accumulator = 0;
+      if (now - lastDraw > 40) {
+        render((v) => v + 1);
+        lastDraw = now;
+      }
+      frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
   }, []);
   useEffect(() => {
-    setOpen(false);
-    window.scrollTo(0, 0);
-  }, [location.pathname]);
-  const title =
-    navigation.find(([path]) => path === location.pathname)?.[1] || "Overview";
+    let disposed = false,
+      timer,
+      controller;
+    const poll = async () => {
+      const current = world.current,
+        pairs = observations(current),
+        stamp = generation.current,
+        epoch = current.epoch;
+      if (!pairs.length) {
+        setScores({});
+        scoreRef.current = {};
+        setApiStatus("No applicable following-pair prediction");
+      } else {
+        controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12000);
+        try {
+          const response = await request("/api/predict-batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: controller.signal,
+            body: JSON.stringify({
+              pairs: pairs.map(({ id, inputs }) => ({ id, inputs })),
+            }),
+          });
+          if (
+            disposed ||
+            stamp !== generation.current ||
+            epoch !== current.epoch
+          ) {
+            if (!disposed) timer = setTimeout(poll, 1000);
+            return;
+          }
+          const currentPairs = observations(current),
+            mapped = {};
+          for (const prediction of response.predictions) {
+            const before = pairs.find((p) => p.id === prediction.id),
+              now = currentPairs.find((p) => p.id === prediction.id);
+            if (!before || !now || before.leaderId !== now.leaderId) continue;
+            mapped[prediction.id] = {
+              ...prediction,
+              at: current.time,
+              wall: Date.now(),
+              leaderId: now.leaderId,
+            };
+            if (
+              prediction.eligible &&
+              prediction.probability >= 0.7 &&
+              !lastElevated.current.has(prediction.id)
+            )
+              event(
+                current,
+                `Vehicle ${prediction.id}: elevated model close-following score (${pct(prediction.probability)})`,
+                "risk",
+              );
+          }
+          lastElevated.current = new Set(
+            Object.values(mapped)
+              .filter((p) => p.eligible && p.probability >= 0.7)
+              .map((p) => p.id),
+          );
+          scoreRef.current = mapped;
+          setScores(mapped);
+          setApiStatus("Model connected · batch updates");
+        } catch (e) {
+          if (!disposed) {
+            setApiStatus("Predictions unavailable · retrying");
+            setScores({});
+            scoreRef.current = {};
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+      if (!disposed) timer = setTimeout(poll, 1000);
+    };
+    poll();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      controller?.abort();
+    };
+  }, []);
+  const freshScore = (c) => {
+    const s = scores[c.id],
+      l = leader(w, c);
+    return s &&
+      l &&
+      l.id === s.leaderId &&
+      Date.now() - s.wall < 5000 &&
+      !c.crashed &&
+      !c.changing
+      ? s
+      : null;
+  };
+  const car = w.cars.find((c) => c.id === selected),
+    ahead = car && leader(w, car);
+  const valid = w.cars.map(freshScore).filter((s) => s?.eligible),
+    average =
+      w.cars.reduce((a, c) => a + c.speed, 0) / Math.max(1, w.cars.length);
+  let minX = Math.min(...w.cars.map((c) => c.x - c.length - 20), 0),
+    maxX = Math.max(130, ...w.cars.map((c) => c.x + 20));
+  // Fit tracks the moving group; it must not keep the origin pinned to the entrance forever.
+  if (w.time > 0 && w.cars.length)
+    minX = Math.min(...w.cars.map((c) => c.x - c.length - 20));
+  let width = Math.max(120, maxX - minX) / zoom;
+  let origin = (camera === "follow" && car ? car.x - width * 0.35 : minX) + pan;
+  const roadHeight = w.lanes * LANE_WIDTH;
+  const height = Math.max(roadHeight + 10, width * 0.34),
+    top = (height - roadHeight) / 2;
+  const roadY = (y) => top + y;
+  const resetScene = () => {
+    setRunning(false);
+    mutate(() => reset(w));
+    setPan(0);
+  };
+  const randomize = () => {
+    setRunning(false);
+    mutate(() => {
+      w.cars = generate(
+        w.lanes,
+        count,
+        seed === "" ? Date.now() : Number(seed),
+      );
+      w.time = 0;
+      w.events = [];
+      w.collisions = [];
+      w.history = [];
+      w.laneChanges = 0;
+      w.nextId = count + 1;
+      saveInitial(w);
+    });
+    select(1);
+  };
+  const score = car && freshScore(car);
   return (
-    <div className="app-shell">
-      {open && (
-        <button
-          className="mobile-scrim"
-          aria-label="Close navigation"
-          onClick={() => setOpen(false)}
-        />
+    <>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">INTERACTIVE LAB / 01</div>
+          <h1>Highway simulator</h1>
+          <p>
+            Build a traffic scene. Change its behavior. Observe what happens.
+          </p>
+        </div>
+        <span
+          className={`status ${apiStatus.startsWith("Model connected") ? "online" : ""}`}
+        >
+          <i />
+          {apiStatus}
+        </span>
+      </div>
+      <div className="sim-layout">
+        <aside className="panel config">
+          <div className="panel-title">
+            <Settings2 size={17} />
+            <h2>Traffic setup</h2>
+          </div>
+          <Field label="Number of Lanes">
+            <select
+              aria-label="Number of Lanes"
+              value={w.lanes}
+              onChange={(e) => {
+                setRunning(false);
+                mutate(() => {
+                  setLanes(w, Number(e.target.value));
+                  saveInitial(w);
+                });
+              }}
+            >
+              {Array.from({ length: 8 }, (_, i) => (
+                <option key={i} value={i + 1}>
+                  {i + 1} {i === 0 ? "lane" : "lanes"}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={`Number of vehicles · ${count}`}>
+            <input
+              aria-label="Number of vehicles"
+              type="range"
+              min="2"
+              max="30"
+              value={count}
+              onChange={(e) => setCount(+e.target.value)}
+            />
+            <div className="range-ends">
+              <span>2 vehicles</span>
+              <span>30 vehicles</span>
+            </div>
+          </Field>
+          <Field label="Random seed (optional)">
+            <input
+              aria-label="Random seed"
+              type="number"
+              value={seed}
+              placeholder="Random"
+              onChange={(e) => setSeed(e.target.value)}
+            />
+          </Field>
+          <Button className="primary full" icon={RotateCcw} onClick={randomize}>
+            Generate Random Traffic
+          </Button>
+          <div className="divider" />
+          <div className="eyebrow">SCENARIO LIBRARY</div>
+          <Field label="Reproducible scenario">
+            <select
+              aria-label="Scenario"
+              value={scenario}
+              onChange={(e) => setScenario(e.target.value)}
+            >
+              {SCENARIOS.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          </Field>
+          <Button
+            className="full"
+            icon={Layers}
+            onClick={() => {
+              setRunning(false);
+              mutate(() => loadScenario(w, scenario));
+              setCount(w.cars.length);
+              select(w.cars[0].id);
+              setPan(0);
+            }}
+          >
+            Load scenario
+          </Button>
+          <div className="divider" />
+          <Field label="Traffic mode">
+            <select
+              aria-label="Traffic mode"
+              value={w.mode}
+              onChange={(e) => mutate(() => (w.mode = e.target.value))}
+            >
+              <option>Manual Traffic</option>
+              <option>Automatic Traffic</option>
+            </select>
+          </Field>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={w.avoidance}
+              onChange={(e) => mutate(() => (w.avoidance = e.target.checked))}
+            />
+            Automatic collision avoidance
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={w.autoLane}
+              onChange={(e) => mutate(() => (w.autoLane = e.target.checked))}
+            />
+            Automatic lane decisions
+          </label>
+          <p className="micro">
+            Automatic rules cruise toward a target speed, brake for short gaps
+            and change lanes only when clear. Manual controls override braking
+            for 3 seconds.
+          </p>
+        </aside>
+        <section className="simulation-main">
+          <div className="panel road-panel">
+            <div className="road-toolbar">
+              <div className="live-label">
+                <span className={running ? "pulse" : ""} />
+                {running ? "SIMULATION RUNNING" : "SIMULATION PAUSED"}
+              </div>
+              <span className="mono" data-testid="sim-time">
+                {w.time.toFixed(1)} s
+              </span>
+              <span className="spacer" />
+              <Button
+                icon={Plus}
+                onClick={() =>
+                  mutate(() => {
+                    const c = addCar(w);
+                    if (c) select(c.id);
+                  })
+                }
+              >
+                Add vehicle
+              </Button>
+            </div>
+            <div className="road-stage">
+              <div className="road-caption">
+                <span>HIGHWAY / {w.lanes} LANES</span>
+                <span>
+                  TRAVEL DIRECTION <ArrowRight size={15} />
+                </span>
+              </div>
+              <svg
+                className="highway"
+                role="img"
+                aria-label="Interactive moving highway; select a vehicle to edit"
+                viewBox={`${origin} 0 ${width} ${height}`}
+              >
+                <defs>
+                  <pattern
+                    id="terrain"
+                    width="7"
+                    height="7"
+                    patternUnits="userSpaceOnUse"
+                  >
+                    <circle cx="2" cy="2" r=".18" fill="#547464" />
+                  </pattern>
+                  <pattern
+                    id="asphalt"
+                    width="1.8"
+                    height="1.8"
+                    patternUnits="userSpaceOnUse"
+                  >
+                    <circle cx=".5" cy=".5" r=".035" fill="#819287" />
+                  </pattern>
+                </defs>
+                <rect x={origin} width={width} height={height} fill="#314c3d" />
+                <rect
+                  x={origin}
+                  width={width}
+                  height={height}
+                  fill="url(#terrain)"
+                />
+                <rect
+                  x={origin}
+                  y={top - 1.4}
+                  width={width}
+                  height={roadHeight + 2.8}
+                  fill="#879187"
+                />
+                <rect
+                  x={origin}
+                  y={top - 0.8}
+                  width={width}
+                  height={roadHeight + 1.6}
+                  fill="#242e2b"
+                />
+                <rect
+                  x={origin}
+                  y={top}
+                  width={width}
+                  height={roadHeight}
+                  fill="url(#asphalt)"
+                />
+                {[top - 0.35, top + roadHeight + 0.35].map((y) => (
+                  <line
+                    key={y}
+                    x1={origin}
+                    x2={origin + width}
+                    y1={y}
+                    y2={y}
+                    stroke="#e3cc78"
+                    strokeWidth=".12"
+                  />
+                ))}
+                {Array.from({ length: w.lanes - 1 }, (_, i) => (
+                  <line
+                    key={i}
+                    x1={origin}
+                    x2={origin + width}
+                    y1={roadY((i + 1) * LANE_WIDTH)}
+                    y2={roadY((i + 1) * LANE_WIDTH)}
+                    stroke="#c0c8bb"
+                    strokeWidth=".12"
+                    strokeDasharray="3 5"
+                  />
+                ))}
+                {Array.from({ length: w.lanes }, (_, i) => (
+                  <text
+                    key={i}
+                    x={origin + 3}
+                    y={roadY((i + 0.5) * LANE_WIDTH) + 0.4}
+                    fill="#a0afa3"
+                    fontSize="1.1"
+                  >
+                    L{i + 1} →
+                  </text>
+                ))}
+                {w.cars.map((c) => {
+                  const l = leader(w, c),
+                    s = freshScore(c);
+                  return s?.eligible && l ? (
+                    <line
+                      key={`gap-${c.id}`}
+                      x1={c.x}
+                      x2={l.x - l.length}
+                      y1={roadY(c.y)}
+                      y2={roadY(c.y)}
+                      stroke={s.probability >= 0.7 ? "#ffb65d" : "#57d9b5"}
+                      strokeDasharray=".6 .6"
+                      strokeWidth=".13"
+                      pointerEvents="none"
+                    />
+                  ) : null;
+                })}
+                {w.cars.map((c) => {
+                  const l = leader(w, c),
+                    s = freshScore(c),
+                    risk = s?.eligible ? s.probability : null;
+                  const color = c.crashed
+                    ? "#ff6c66"
+                    : risk != null && risk >= 0.7
+                      ? "#ffb65d"
+                      : c.color;
+                  return (
+                    <g
+                      key={c.id}
+                      onClick={() => select(c.id)}
+                      tabIndex="0"
+                      role="button"
+                      aria-label={`Vehicle ${c.id}`}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") select(c.id);
+                      }}
+                      style={{ cursor: "pointer" }}
+                    >
+                      {selected === c.id && (
+                        <rect
+                          x={c.x - c.length - 0.5}
+                          y={roadY(c.y) - c.width / 2 - 0.5}
+                          width={c.length + 1}
+                          height={c.width + 1}
+                          rx=".6"
+                          fill="none"
+                          stroke="white"
+                          strokeWidth=".12"
+                        />
+                      )}
+                      <rect
+                        x={c.x - c.length}
+                        y={roadY(c.y) - c.width / 2}
+                        width={c.length}
+                        height={c.width}
+                        rx=".35"
+                        fill={color}
+                        stroke="#15251f"
+                        strokeWidth=".12"
+                      />
+                      <rect
+                        x={c.x - 1.5}
+                        y={roadY(c.y) - c.width * 0.38}
+                        width=".75"
+                        height={c.width * 0.76}
+                        rx=".1"
+                        fill="#284a47"
+                      />
+                      <rect
+                        x={c.x - c.length + 0.55}
+                        y={roadY(c.y) - c.width * 0.38}
+                        width=".55"
+                        height={c.width * 0.76}
+                        rx=".1"
+                        fill="#284a47"
+                      />
+                      <line
+                        x1={c.x - 0.15}
+                        x2={c.x - 0.15}
+                        y1={roadY(c.y) - c.width * 0.35}
+                        y2={roadY(c.y) + c.width * 0.35}
+                        stroke="#fff5bd"
+                        strokeWidth=".16"
+                      />
+                      {(c.actualAccel ?? c.accel) < -0.5 && (
+                        <line
+                          x1={c.x - c.length + 0.1}
+                          x2={c.x - c.length + 0.1}
+                          y1={roadY(c.y) - c.width * 0.4}
+                          y2={roadY(c.y) + c.width * 0.4}
+                          stroke="#ff3a36"
+                          strokeWidth=".28"
+                        />
+                      )}
+                      <text
+                        x={c.x - c.length / 2}
+                        y={roadY(c.y) - c.width / 2 - 1}
+                        textAnchor="middle"
+                        fontSize="1.35"
+                        fill="#f1f6ef"
+                        fontWeight="600"
+                      >
+                        {c.id}
+                        {risk != null ? ` · ${pct(risk)}` : ""}
+                      </text>
+                      {c.crashed && (
+                        <text
+                          x={c.x - c.length / 2}
+                          y={roadY(c.y) + 0.5}
+                          textAnchor="middle"
+                          fill="#631e1b"
+                          fontSize="1.8"
+                        >
+                          ×
+                        </text>
+                      )}
+                      <rect
+                        x={c.x - c.length - 1}
+                        y={roadY(c.y) - c.width / 2 - 3}
+                        width={c.length + 2}
+                        height={c.width + 4}
+                        fill="transparent"
+                      />
+                    </g>
+                  );
+                })}
+                {w.collisions.map((c, i) => (
+                  <g key={i}>
+                    <circle
+                      cx={c.x}
+                      cy={roadY(c.y)}
+                      r="2.6"
+                      fill="none"
+                      stroke="#ff7971"
+                      strokeWidth=".2"
+                      strokeDasharray=".5 .4"
+                    />
+                  </g>
+                ))}
+                <line
+                  x1={origin + width - 25}
+                  x2={origin + width - 5}
+                  y1={height - 4}
+                  y2={height - 4}
+                  stroke="#d1ddcf"
+                  strokeWidth=".15"
+                />
+                <text
+                  x={origin + width - 15}
+                  y={height - 2}
+                  textAnchor="middle"
+                  fill="#d1ddcf"
+                  fontSize="1.3"
+                >
+                  20 m
+                </text>
+              </svg>
+              <div className="road-legend">
+                <span>
+                  <i style={{ background: "#4ed8bb" }} />
+                  Vehicle
+                </span>
+                <span>
+                  <i style={{ background: "#ffb65d" }} />
+                  Elevated model score
+                </span>
+                <span>
+                  <i style={{ background: "#ff6c66" }} />
+                  Simulated contact
+                </span>
+              </div>
+            </div>
+            <div className="playback">
+              <Button
+                className="primary"
+                icon={running ? Pause : Play}
+                onClick={() => setRunning(!running)}
+              >
+                {running
+                  ? "Pause Simulation"
+                  : w.time
+                    ? "Resume Simulation"
+                    : "Start Simulation"}
+              </Button>
+              <Button icon={RotateCcw} onClick={resetScene}>
+                Reset
+              </Button>
+              <Button
+                onClick={() => {
+                  setRunning(false);
+                  mutate(() => rewind(w));
+                }}
+              >
+                Rewind 2 s
+              </Button>
+              <Button
+                onClick={() => {
+                  mutate(() => rewind(w));
+                  setRunning(true);
+                }}
+              >
+                Replay
+              </Button>
+              <span className="spacer" />
+              <select
+                aria-label="Simulation speed"
+                value={rate}
+                onChange={(e) => setRate(+e.target.value)}
+              >
+                {[0.5, 1, 2, 4].map((v) => (
+                  <option key={v} value={v}>
+                    {v}× speed
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="camera">
+              <span>CAMERA</span>
+              <Button
+                icon={Scan}
+                onClick={() => {
+                  setCamera("fit");
+                  setPan(0);
+                  setZoom(1);
+                }}
+              >
+                Fit all
+              </Button>
+              <Button
+                onClick={() => {
+                  setCamera("follow");
+                  setPan(0);
+                }}
+              >
+                Follow selected
+              </Button>
+              <Button
+                aria-label="Zoom in"
+                icon={ZoomIn}
+                onClick={() => setZoom(Math.min(5, zoom * 1.3))}
+              />
+              <Button
+                aria-label="Zoom out"
+                icon={ZoomOut}
+                onClick={() => setZoom(Math.max(0.4, zoom / 1.3))}
+              />
+              <Button
+                aria-label="Pan left"
+                icon={ChevronLeft}
+                onClick={() => setPan(pan - 30)}
+              />
+              <Button
+                aria-label="Pan right"
+                icon={ChevronRight}
+                onClick={() => setPan(pan + 30)}
+              />
+            </div>
+          </div>
+          {w.collisions.length > 0 && (
+            <div className="collision-alert" role="status">
+              <ShieldAlert size={20} />
+              <div>
+                <strong>Hypothetical Simulated Collision</strong>
+                <p>
+                  {w.collisions.length} geometric contact
+                  {w.collisions.length === 1 ? "" : "s"} detected. Rewind to
+                  inspect or change controls and compare.
+                </p>
+              </div>
+              <Button onClick={() => setRunning(false)}>Pause scene</Button>
+            </div>
+          )}
+          <div className="live-stats">
+            <Stat label="Active vehicles" value={w.cars.length} />
+            <Stat
+              label="Average speed"
+              value={`${(average * 3.6).toFixed(0)} km/h`}
+            />
+            <Stat
+              label="Braking / lane changes"
+              value={`${w.cars.filter((c) => (c.actualAccel ?? c.accel) < -0.5).length} / ${w.laneChanges}`}
+            />
+            <Stat label="Simulated contacts" value={w.collisions.length} />
+            <Stat label="Valid model scores" value={valid.length} />
+            <Stat
+              label="Highest score"
+              value={
+                valid.length
+                  ? pct(Math.max(...valid.map((s) => s.probability)))
+                  : "—"
+              }
+            />
+          </div>
+          <div className="panel timeline">
+            <div className="panel-title">
+              <Activity size={17} />
+              <h2>Event timeline</h2>
+              <span className="spacer" />
+              <span className="micro">Actual simulation events</span>
+            </div>
+            {w.events.length ? (
+              w.events.slice(0, 10).map((e, i) => (
+                <div className={`event ${e.type}`} key={`${i}-${e.time}`}>
+                  <time>{e.time.toFixed(1)} s</time>
+                  <i />
+                  <span>{e.text}</span>
+                </div>
+              ))
+            ) : (
+              <div className="empty">
+                Start a scenario or adjust a vehicle. Its events appear here.
+              </div>
+            )}
+          </div>
+        </section>
+        <aside className="panel inspector">
+          <div className="panel-title">
+            <Car size={18} />
+            <h2>Vehicle inspector</h2>
+          </div>
+          <Field label="Selected vehicle">
+            <select
+              aria-label="Selected vehicle"
+              value={selected}
+              onChange={(e) => select(+e.target.value)}
+            >
+              {!car && <option value={selected}>Choose a vehicle</option>}
+              {w.cars.map((c) => (
+                <option key={c.id} value={c.id}>
+                  Vehicle {c.id} · Lane {c.lane + 1}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {car ? (
+            <>
+              <div
+                className="vehicle-preview"
+                style={{ "--car-color": car.color }}
+              >
+                <Car size={65} />
+                <strong>V{String(car.id).padStart(2, "0")}</strong>
+                <span>
+                  {car.type} · {car.length} m
+                </span>
+              </div>
+              <div className="pair-info">
+                <div>
+                  <span>Position</span>
+                  <b>{car.x.toFixed(1)} m</b>
+                </div>
+                <div>
+                  <span>Current speed</span>
+                  <b>{(car.speed * 3.6).toFixed(1)} km/h</b>
+                </div>
+                <div>
+                  <span>Leading vehicle</span>
+                  <b>{ahead ? `V${ahead.id}` : "—"}</b>
+                </div>
+                <div>
+                  <span>Bumper gap</span>
+                  <b>
+                    {ahead
+                      ? `${Math.max(0, ahead.x - ahead.length - car.x).toFixed(1)} m`
+                      : "—"}
+                  </b>
+                </div>
+                <div>
+                  <span>State</span>
+                  <b>
+                    {car.crashed
+                      ? "Simulated contact"
+                      : car.changing
+                        ? "Changing lane"
+                        : (car.actualAccel ?? car.accel) < -0.5
+                          ? "Braking"
+                          : "Cruising"}
+                  </b>
+                </div>
+              </div>
+              <div className="risk-box">
+                <span>FUTURE CLOSE-FOLLOWING SCORE</span>
+                <strong>
+                  {score?.eligible ? pct(score.probability) : "—"}
+                </strong>
+                <small>
+                  {score?.eligible
+                    ? `Model output at ${score.at.toFixed(1)} s · next 2 s`
+                    : score?.reason ||
+                      "No applicable following-pair prediction"}
+                </small>
+              </div>
+              <Field label="Target speed (km/h)">
+                <input
+                  aria-label="Vehicle speed"
+                  disabled={car.crashed}
+                  type="number"
+                  min="0"
+                  max="162"
+                  value={Math.round(car.desired * 3.6)}
+                  onChange={(e) =>
+                    mutate(() => {
+                      car.desired = Math.max(
+                        0,
+                        Math.min(45, +e.target.value / 3.6),
+                      );
+                      car.targetActive = true;
+                      event(
+                        w,
+                        `Vehicle ${car.id} speed set to ${(car.desired * 3.6).toFixed(0)} km/h`,
+                      );
+                    })
+                  }
+                />
+              </Field>
+              <Field label="Acceleration (m/s²)">
+                <input
+                  aria-label="Vehicle acceleration"
+                  disabled={car.crashed}
+                  type="number"
+                  min="-8"
+                  max="4"
+                  step=".25"
+                  value={car.accel}
+                  onChange={(e) =>
+                    mutate(() => {
+                      car.accel = Math.max(-8, Math.min(4, +e.target.value));
+                      car.actualAccel = car.accel;
+                      car.targetActive = false;
+                    })
+                  }
+                />
+              </Field>
+              <div className="button-row">
+                <Button
+                  onClick={() => mutate(() => brake(w, car))}
+                  disabled={car.crashed}
+                >
+                  Apply brakes
+                </Button>
+                <Button
+                  onClick={() =>
+                    mutate(() => {
+                      car.targetActive = false;
+                      car.speed = 0;
+                      car.desired = 0;
+                      car.accel = 0;
+                      car.actualAccel = 0;
+                      event(w, `Vehicle ${car.id} stopped`);
+                    })
+                  }
+                >
+                  Stop
+                </Button>
+              </div>
+              <div className="button-row">
+                <Button
+                  icon={ChevronLeft}
+                  disabled={car.lane === 0 || car.changing || car.crashed}
+                  onClick={() => mutate(() => changeLane(w, car, car.lane - 1))}
+                >
+                  Left lane
+                </Button>
+                <Button
+                  icon={ChevronRight}
+                  disabled={
+                    car.lane === w.lanes - 1 || car.changing || car.crashed
+                  }
+                  onClick={() => mutate(() => changeLane(w, car, car.lane + 1))}
+                >
+                  Right lane
+                </Button>
+              </div>
+              <Button
+                className="full"
+                onClick={() =>
+                  mutate(() => {
+                    const c = generate(
+                      w.lanes,
+                      1,
+                      Number(seed) + car.id + Math.round(w.time * 100),
+                    )[0];
+                    car.speed = c.speed;
+                    car.desired = c.desired;
+                    car.accel = c.accel;
+                    car.color = c.color;
+                    event(w, `Vehicle ${car.id} behavior regenerated`);
+                  })
+                }
+                disabled={car.crashed}
+              >
+                Regenerate selected
+              </Button>
+              <Button
+                className="full danger"
+                icon={Trash2}
+                onClick={() =>
+                  mutate(() => {
+                    w.cars = w.cars.filter((c) => c.id !== car.id);
+                    select(w.cars[0]?.id || 0);
+                  })
+                }
+              >
+                Remove vehicle
+              </Button>
+            </>
+          ) : (
+            <p className="empty">Add or select a vehicle to inspect it.</p>
+          )}
+        </aside>
+      </div>
+      <p className="footnote">
+        <Info size={14} /> Model scores estimate an observed short-headway
+        event, not a verified accident probability. Collisions use vehicle
+        geometry. Simulation behavior can differ from NGSIM.
+      </p>
+    </>
+  );
+}
+
+function Plot({ data, x = "value", y = "count", scatter = false }) {
+  return (
+    <ResponsiveContainer width="100%" height={230}>
+      {scatter ? (
+        <ScatterChart>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis type="number" dataKey={x} name="Speed" unit=" m/s" />
+          <YAxis type="number" dataKey={y} name="Gap" unit=" m" />
+          <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+          <Scatter data={data} fill="#208777" />
+        </ScatterChart>
+      ) : (
+        <BarChart data={data}>
+          <CartesianGrid vertical={false} stroke="#e7ece7" />
+          <XAxis
+            dataKey={x}
+            tickFormatter={(v) => Number(v).toFixed(1)}
+            tick={{ fontSize: 11 }}
+            minTickGap={24}
+          />
+          <YAxis tick={{ fontSize: 11 }} width={55} />
+          <Tooltip />
+          <Bar dataKey={y} fill="#218b76" radius={[3, 3, 0, 0]} />
+        </BarChart>
       )}
-      <aside className={`sidebar ${open ? "open" : ""}`}>
-        <Link className="brand" to="/">
-          <span className="brand-mark">
-            <RoadIcon size={23} />
-          </span>
+    </ResponsiveContainer>
+  );
+}
+function Dashboard() {
+  const { data: a, source } = useResearch("analytics"),
+    { data: m } = useResearch("metrics");
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">NGSIM / US-101</div>
+          <h1>Traffic, understood through motion.</h1>
+          <p>
+            Real trajectory analysis meets an interactive highway laboratory.
+          </p>
+        </div>
+        <NavLink className="link-button primary" to="/simulator">
+          Open simulator <ArrowRight size={16} />
+        </NavLink>
+      </div>
+      {!a ? (
+        <p>{source}</p>
+      ) : (
+        <>
+          <div className="overview-stats">
+            <Stat
+              label="Recorded observations"
+              value={num(a.rows)}
+              note="Genuine DOT trajectory records"
+            />
+            <Stat
+              label="Unique vehicles"
+              value={num(a.vehicles)}
+              note={`${a.recording_count} complete recording · ${a.duration_seconds.toFixed(0)} seconds`}
+            />
+            <Stat
+              label="Eligible future windows"
+              value={num(a.eligible_rows)}
+              note="Complete 2-second same-leader windows"
+            />
+            <Stat
+              label="Selected model"
+              value={m?.selected_model || "Loading…"}
+              note={m ? `Test F1 ${pct(m.test.f1)}` : ""}
+            />
+          </div>
+          <div className="dashboard-grid">
+            <div className="panel feature-card">
+              <TrafficCone size={34} />
+              <div className="eyebrow">YOUR TRAFFIC LABORATORY</div>
+              <h2>A road you can experiment with.</h2>
+              <p>
+                Generate up to 30 vehicles across 1–8 lanes. Brake a leader,
+                change a lane and replay the resulting contact.
+              </p>
+              <NavLink to="/simulator" className="link-button primary">
+                Build a scenario <ArrowRight size={16} />
+              </NavLink>
+              <div className="mini-road">
+                {[0, 1, 2].map((l) => (
+                  <div key={l}>
+                    {[0, 1].map((c) => (
+                      <Car
+                        key={c}
+                        size={36}
+                        style={{
+                          marginLeft: `${30 + l * 12 + c * 20}px`,
+                          color: ["#4ed8bb", "#f2c46f", "#8daeff"][l],
+                        }}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="panel chart-card">
+              <div className="panel-title">
+                <Gauge size={18} />
+                <h2>Recorded vehicle speeds</h2>
+              </div>
+              <Plot data={a.histograms.v_vel} />
+              <p className="micro">
+                Speed in m/s · observation counts from the cleaned recording.
+              </p>
+            </div>
+          </div>
+          <div className="panel methodology">
+            <h2>One project. Two distinct systems.</h2>
+            <div>
+              <p>
+                <b>Predictive analytics</b>
+                <br />
+                Logistic Regression, LDA and QDA learn future short-following
+                events from historical trajectories.
+              </p>
+              <p>
+                <b>Traffic simulation</b>
+                <br />
+                Movement rules, smooth lateral motion and body overlaps produce
+                hypothetical incidents.
+              </p>
+              <p>
+                <b>Honest integration</b>
+                <br />
+                Eligible current pairs receive actual fitted-model scores.
+                Unavailable or unsupported scores stay blank.
+              </p>
+            </div>
+          </div>
+          <p className="footnote">
+            {source} · Dataset SHA-256: {a.sha256.slice(0, 16)}…
+          </p>
+        </>
+      )}
+    </>
+  );
+}
+function Analysis() {
+  const { data: a, source } = useResearch("analytics");
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">RESEARCH / DATA EXPLORATION</div>
+          <h1>Inside the trajectories</h1>
+          <p>Actual observations from one complete US-101 recording.</p>
+        </div>
+        <span className="status">{source}</span>
+      </div>
+      {a ? (
+        <>
+          <div className="chart-grid">
+            {[
+              ["v_vel", "Vehicle speed · m/s"],
+              ["v_acc", "Acceleration · m/s²"],
+              ["gap", "Bumper following gap · m"],
+              ["headway", "Front-to-front time headway · s (capped at 10)"],
+              ["lane_id", "Lane distribution"],
+              ["v_class", "Vehicle type (1 motorcycle, 2 car, 3 truck)"],
+            ].map(([key, title]) => (
+              <div className="panel chart-card" key={key}>
+                <h2>{title}</h2>
+                <Plot data={a.histograms[key]} />
+              </div>
+            ))}
+            <div className="panel chart-card">
+              <h2>Speed versus bumper gap</h2>
+              <Plot data={a.speed_gap} x="speed" y="gap" scatter />
+            </div>
+            <div className="panel chart-card">
+              <h2>Target threshold sensitivity</h2>
+              <Plot
+                data={Object.entries(a.threshold_sensitivity).map(
+                  ([value, count]) => ({ value, count: count * 100 }),
+                )}
+              />
+              <p className="micro">
+                Threshold (seconds) versus positive windows (%). Threshold
+                choice changes the research question.
+              </p>
+            </div>
+          </div>
+          <div className="panel table-panel">
+            <h2>Feature correlations</h2>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Feature</th>
+                    {Object.keys(a.correlation).map((k) => (
+                      <th key={k}>{k}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(a.correlation).map(([key, row]) => (
+                    <tr key={key}>
+                      <th>{key}</th>
+                      {Object.keys(a.correlation).map((k) => (
+                        <td
+                          key={k}
+                          style={{
+                            background: `rgba(32,135,119,${Math.abs(row[k]) * 0.16})`,
+                          }}
+                        >
+                          {row[k].toFixed(2)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p className="footnote">
+            Vehicle types come from the official per-vehicle class lookup.
+            Future windows require a constant valid leader/lane. Positives
+            include persistence of an already short headway.
+          </p>
+        </>
+      ) : (
+        <p>{source}</p>
+      )}
+    </>
+  );
+}
+function Comparison() {
+  const { data: m, source } = useResearch("metrics");
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">RESEARCH / CLASSIFICATION</div>
+          <h1>Let the validation decide.</h1>
+          <p>
+            Three syllabus algorithms. Identical features and data partitions.
+          </p>
+        </div>
+        <span className="status">{source}</span>
+      </div>
+      {m ? (
+        <>
+          <div className="overview-stats">
+            <Stat label="Selected pipeline" value={m.selected_model} />
+            <Stat label="Untouched test F1" value={pct(m.test.f1)} />
+            <Stat label="Untouched test ROC-AUC" value={pct(m.test.roc_auc)} />
+            <Stat
+              label="Persistence baseline F1"
+              value={pct(m.persistence_baseline_f1)}
+            />
+          </div>
+          <div className="panel table-panel">
+            <h2>Validation comparison</h2>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Algorithm</th>
+                    <th>Train F1</th>
+                    <th>CV F1</th>
+                    {["accuracy", "precision", "recall", "f1", "roc_auc"].map(
+                      (k) => (
+                        <th key={k}>{k.replace("_", " ").toUpperCase()}</th>
+                      ),
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {m.comparison.map((r) => (
+                    <tr
+                      key={r.name}
+                      className={
+                        r.name === m.selected_model ? "selected-row" : ""
+                      }
+                    >
+                      <th>
+                        {r.name}
+                        {r.name === m.selected_model && (
+                          <span className="tag">SELECTED</span>
+                        )}
+                      </th>
+                      <td>{pct(r.training.f1)}</td>
+                      <td>{pct(r.cv_f1)}</td>
+                      {["accuracy", "precision", "recall", "f1", "roc_auc"].map(
+                        (k) => (
+                          <td key={k}>{pct(r.validation[k])}</td>
+                        ),
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="chart-grid">
+            {m.comparison.map((r) => (
+              <div className="panel matrix" key={r.name}>
+                <h2>{r.name} · validation</h2>
+                <p className="micro">
+                  Rows = observed 0 / 1 · Columns = predicted 0 / 1
+                </p>
+                <div>
+                  {r.validation.confusion_matrix.flat().map((n, i) => (
+                    <strong key={i}>{num(n)}</strong>
+                  ))}
+                </div>
+                <small>Parameters: {JSON.stringify(r.parameters)}</small>
+              </div>
+            ))}
+          </div>
+          <div className="panel methodology">
+            <h2>Validation protocol & limitations</h2>
+            <p>
+              {m.protocol}. Split sizes:{" "}
+              {Object.entries(m.split_sizes)
+                .map(([k, v]) => `${k}: ${num(v)}`)
+                .join(" · ")}
+              .
+            </p>
+            <p>
+              Model selection uses validation F1; the selected training-fitted
+              pipeline is evaluated once on test. Probabilities are
+              uncalibrated. Compare the persistence baseline before interpreting
+              scores as advance warning. One recording does not establish
+              generalization across roads or dates.
+            </p>
+          </div>
+          <div className="panel table-panel">
+            <h2>Selected model · untouched test</h2>
+            <p>
+              {Object.entries(m.test)
+                .filter(([k]) => k !== "confusion_matrix")
+                .map(([k, v]) => `${k}: ${pct(v)}`)
+                .join(" · ")}
+            </p>
+          </div>
+        </>
+      ) : (
+        <p>{source}</p>
+      )}
+    </>
+  );
+}
+function About() {
+  const { data: info } = useResearch("info");
+  return (
+    <>
+      <div className="page-heading">
+        <div>
+          <div className="eyebrow">CSE3141 / MANIPAL UNIVERSITY JAIPUR</div>
+          <h1>A clear question. An honest experiment.</h1>
+          <p>NearMiss — Traffic Analysis and Prediction</p>
+        </div>
+      </div>
+      <div className="panel about">
+        <h2>What does NearMiss predict?</h2>
+        <p>
+          Whether a front-to-front time headway below 1.5 seconds appears in the
+          next two seconds of a stable moving following pair. The target
+          includes persistence of an already short gap. It does not predict
+          verified accidents.
+        </p>
+        <h2>Where does the data come from?</h2>
+        <p>
+          <a
+            href="https://data.transportation.gov/d/8ect-6jqj"
+            target="_blank"
+            rel="noreferrer"
+          >
+            U.S. Department of Transportation NGSIM US-101 ↗
+          </a>
+          . One coherent recording retains all frames for labeling. Feet are
+          converted to metres. Leaders are matched at the same timestamp.
+          Missing references and incomplete windows are excluded.
+        </p>
+        <h2>How does the simulator work?</h2>
+        <p>
+          Positions update at 120 fixed steps/second. Longitudinal motion
+          integrates speed and acceleration; lane changes use a 1.6-second
+          smooth lateral interpolation. Axis-aligned vehicle bodies determine
+          contacts, including while changing lanes. Contacted vehicles stop and
+          remain obstacles, permitting sequential incidents. This is an
+          illustrative contact response, not a validated crash-dynamics model.
+        </p>
+        <p>
+          Manual mode applies user inputs. Automatic mode uses a proportional
+          cruise-speed rule and optional gap braking/lane-clearance checks.
+          These are programmed rules, not additional ML algorithms. No automatic
+          vehicle spawning is enabled. The camera follows traffic as it moves.
+        </p>
+        <h2>What do the model scores mean?</h2>
+        <p>
+          Actual output of the exported fitted pipeline, for supported same-lane
+          pairs. No leader, lane transition, collision, unsupported values or
+          API failure means no displayed prediction. Observations are batched
+          once per second; older responses cannot overwrite a reset scene.
+          Training support checks do not establish joint-distribution similarity
+          to real traffic.
+        </p>
+        <h2>Research limitations</h2>
+        <p>
+          The 1.5-second threshold is experimental. Official vehicle types are
+          shown in EDA; the model uses current interaction features and leader
+          length. Future labels require no leader/lane change; arbitrary
+          simulator scenarios may violate this conditioning. Scores are
+          uncalibrated. The provided syllabus topic list, rather than an
+          unavailable handout, determines the model choices.
+        </p>
+        {info && (
+          <>
+            <h2>Exported model schema</h2>
+            <p>
+              {info.name} · {info.version}
+            </p>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Feature</th>
+                    <th>Unit</th>
+                    <th>Training support</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {info.features.map((f) => (
+                    <tr key={f}>
+                      <td>{f}</td>
+                      <td>{info.units[f]}</td>
+                      <td>
+                        {info.ranges[f].map((n) => n.toFixed(2)).join(" – ")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+const nav = [
+  ["/", "Dashboard", Layers],
+  ["/analysis", "Data analysis", BarChart3],
+  ["/simulator", "Highway simulator", Car],
+  ["/performance", "Model comparison", GitBranch],
+  ["/about", "About", Info],
+];
+export default function App() {
+  return (
+    <div className="app">
+      <header>
+        <NavLink to="/" className="brand">
           <span>
-            TrafficRush<small>TRAFFIC ANALYSIS & PREDICTION</small>
+            <TrafficCone size={23} />
           </span>
-        </Link>
-        <div className="sidebar-label">WORKSPACE</div>
-        <nav aria-label="Main navigation">
-          {navigation.map(([path, label, Icon]) => (
-            <NavLink key={path} to={path} end={path === "/"}>
-              <Icon size={18} />
-              <span>{label}</span>
-              <ChevronRight size={13} />
+          <div>
+            NearMiss<small>TRAFFIC ANALYSIS & PREDICTION</small>
+          </div>
+        </NavLink>
+        <nav>
+          {nav.map(([to, label, Icon]) => (
+            <NavLink end={to === "/"} to={to} key={to}>
+              <Icon size={16} />
+              {label}
             </NavLink>
           ))}
         </nav>
-        <div className="sidebar-bottom">
-          <div className="dataset-label">
-            <span className="dot" /> REAL DATA. CLEARER CONTEXT.
-          </div>
-          <p>
-            Built on historical I-94 traffic.
-            <br />
-            Designed to make patterns understandable.
-          </p>
-          <a href={repo} target="_blank" rel="noreferrer">
-            <GitBranch size={15} /> View project on GitHub{" "}
-            <ExternalLink size={12} />
-          </a>
-          <div className="course-label">
-            CSE3141 · Manipal University Jaipur
-          </div>
-        </div>
-      </aside>
-      <div className="main-shell">
-        <header className="topbar">
-          <div className="breadcrumb">
-            <button
-              className="mobile-menu"
-              aria-label="Open navigation"
-              onClick={() => setOpen(true)}
-            >
-              <Menu size={21} />
-            </button>
-            <span>Workspace</span>
-            <ChevronRight size={13} />
-            <strong>{title}</strong>
-          </div>
-          <div className="topbar-right">
-            <span
-              className={`connection ${research?.source === "api" ? "connected" : ""}`}
-            >
-              <span className="dot" />
-              {research?.source === "api"
-                ? "Model connected"
-                : "Saved analysis"}
-            </span>
-            <a
-              className="source-button"
-              href="https://archive.ics.uci.edu/dataset/492/metro+interstate+traffic+volume"
-              target="_blank"
-              rel="noreferrer"
-            >
-              UCI source <ExternalLink size={13} />
-            </a>
-          </div>
-        </header>
-        <main>
-          {error ? (
-            <div className="error-message" role="alert">
-              Analysis could not load: {error}. Refresh or start the backend.
-            </div>
-          ) : !research ? (
-            <div className="loading">
-              <LoaderCircle className="spin" /> Loading actual notebook results…
-            </div>
-          ) : (
-            <Routes>
-              <Route path="/" element={<Overview {...research} />} />
-              <Route path="/analysis" element={<Analysis {...research} />} />
-              <Route
-                path="/prediction"
-                element={<Prediction {...research} />}
-              />
-              <Route
-                path="/performance"
-                element={<Performance {...research} />}
-              />
-              <Route path="/about" element={<About {...research} />} />
-              <Route
-                path="*"
-                element={
-                  <div className="notice">
-                    Page not found. <Link to="/">Return to overview</Link>
-                  </div>
-                }
-              />
-            </Routes>
-          )}
-        </main>
-        <footer>
-          <span>
-            TrafficRush <i>·</i> Historical patterns, transparent predictions.
-          </span>
-          <span>
-            <span className="dot" /> Academic project · Not a live traffic
-            service
-          </span>
-        </footer>
-      </div>
+        <span className="course">
+          CSE3141 <span>RESEARCH LAB</span>
+        </span>
+      </header>
+      <main>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/simulator" element={<Simulator />} />
+          <Route path="/prediction" element={<Simulator />} />
+          <Route path="/analysis" element={<Analysis />} />
+          <Route path="/performance" element={<Comparison />} />
+          <Route path="/about" element={<About />} />
+          <Route path="*" element={<Dashboard />} />
+        </Routes>
+      </main>
+      <footer>
+        <span>
+          NearMiss <b> / </b> A laboratory for traffic interactions
+        </span>
+        <span>
+          Real trajectories. Hypothetical collisions. Clear boundaries.
+        </span>
+      </footer>
     </div>
   );
 }
