@@ -1,0 +1,50 @@
+{
+  "name": "Logistic Regression",
+  "version": "nearmiss-1",
+  "features": [
+    "follower_speed",
+    "leader_speed",
+    "follower_accel",
+    "leader_accel",
+    "spacing_m",
+    "leader_length"
+  ],
+  "units": {
+    "follower_speed": "m/s",
+    "leader_speed": "m/s",
+    "follower_accel": "m/s\u00b2",
+    "leader_accel": "m/s\u00b2",
+    "spacing_m": "m front-to-front",
+    "leader_length": "m"
+  },
+  "ranges": {
+    "follower_speed": [
+      0.509016,
+      27.343608
+    ],
+    "leader_speed": [
+      0.0,
+      29.04744
+    ],
+    "follower_accel": [
+      -3.41376,
+      3.41376
+    ],
+    "leader_accel": [
+      -3.41376,
+      3.41376
+    ],
+    "spacing_m": [
+      3.2400240000000005,
+      149.92807200000001
+    ],
+    "leader_length": [
+      1.8288000000000002,
+      23.19528
+    ]
+  },
+  "horizon_seconds": 2,
+  "headway_threshold_seconds": 1.5,
+  "target": "Any front-to-front headway below 1.5 s in next 20 complete 100 ms observations; same leader and lane",
+  "probability_note": "Uncalibrated close-following score; not collision probability"
+}

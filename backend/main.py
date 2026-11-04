@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-from datetime import datetime
 from pathlib import Path
 import json
 import os
@@ -8,129 +7,109 @@ import joblib
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ARTIFACTS = Path(os.getenv("ARTIFACT_DIR", Path(__file__).parent / "artifacts"))
+ARTIFACTS = Path(os.getenv('ARTIFACT_DIR', Path(__file__).parent / 'artifacts'))
 bundle = {}
 load_error = None
-
 
 @asynccontextmanager
 async def lifespan(app):
     global load_error
+    bundle.clear()
     try:
-        bundle["model"] = joblib.load(ARTIFACTS / "traffic_model.joblib")
-        for name in ["overview", "analytics", "metrics"]:
-            bundle[name] = json.loads(
-                (ARTIFACTS / f"{name}.json").read_text(encoding="utf-8")
-            )
+        loaded = {name: json.loads((ARTIFACTS / f'{name}.json').read_text(encoding='utf-8')) for name in ['info','metrics','analytics']}
+        loaded['model'] = joblib.load(ARTIFACTS / 'nearmiss.joblib')
+        if list(loaded['model'].feature_names_in_) != loaded['info']['features']:
+            raise ValueError('Feature schema mismatch')
+        bundle.update(loaded)
         load_error = None
-    except Exception as error:
-        bundle.clear()
-        load_error = f"Model artifacts unavailable. Execute the notebook first. {type(error).__name__}"
+    except Exception as exc:
+        load_error = f'Model unavailable ({type(exc).__name__}). Execute notebooks/NearMiss.ipynb.'
     yield
 
+app = FastAPI(title='NearMiss API', version='1.0.0', lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in os.getenv('CORS_ORIGINS','http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173').split(',') if x.strip()], allow_methods=['GET','POST'], allow_headers=['Content-Type'])
 
-app = FastAPI(title="TrafficRush API", version="1.0.0", lifespan=lifespan)
-origins = os.getenv(
-    "CORS_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173,https://doctordictator.github.io",
-)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins.split(","),
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
-)
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exc):
+    # Omit raw inputs/context: nonfinite numbers in them cannot be JSON serialized.
+    errors = [{key: error[key] for key in ['loc','msg','type']} for error in exc.errors()]
+    return JSONResponse(status_code=422, content={'detail': errors})
 
-
-def require_bundle():
-    if not bundle:
-        raise HTTPException(503, detail=load_error or "Model is not loaded.")
+def ready():
+    if not bundle: raise HTTPException(503, detail=load_error or 'Model unavailable')
     return bundle
 
+class Pair(BaseModel):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    follower_speed: float = Field(ge=.5, le=55)
+    leader_speed: float = Field(ge=0, le=55)
+    follower_accel: float = Field(ge=-12, le=8)
+    leader_accel: float = Field(ge=-12, le=8)
+    spacing_m: float = Field(gt=0, le=2000)
+    leader_length: float = Field(ge=1, le=25)
 
-class TrafficInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    date_time: datetime
-    is_holiday: bool = False
-    temp_c: float = Field(ge=-60, le=60)
-    rain_1h: float = Field(ge=0, le=1000)
-    snow_1h: float = Field(ge=0, le=1000)
-    clouds_all: float = Field(ge=0, le=100)
-    weather_main: str = Field(min_length=1, max_length=40)
+    @model_validator(mode='after')
+    def separated_bodies(self):
+        if self.spacing_m <= self.leader_length:
+            raise ValueError('Front spacing must exceed leader length (positive bumper gap).')
+        return self
 
-    @field_validator("date_time")
-    @classmethod
-    def local_hour(cls, value):
-        if (
-            value.tzinfo is not None
-            or value.minute
-            or value.second
-            or value.microsecond
-        ):
-            raise ValueError(
-                "Use a local date/time at the start of an hour, without a timezone offset."
-            )
-        if not 2012 <= value.year <= 2100:
-            raise ValueError("Choose a year from 2012 to 2100.")
-        return value
+class Item(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    id: str = Field(min_length=1, max_length=50)
+    inputs: Pair
 
+class Batch(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    pairs: list[Item] = Field(min_length=1, max_length=30)
 
-@app.get("/api/health")
-def health():
-    return {
-        "status": "ready" if bundle else "unavailable",
-        "model_loaded": bool(bundle),
-        "detail": load_error,
-    }
+    @model_validator(mode='after')
+    def unique_ids(self):
+        if len({p.id for p in self.pairs}) != len(self.pairs): raise ValueError('Pair IDs must be unique.')
+        return self
 
+def support(row, info):
+    return [key for key, value in row.items() if not info['ranges'][key][0] <= value <= info['ranges'][key][1]]
 
-@app.get("/api/overview")
-def overview():
-    return require_bundle()["overview"]
+def infer(rows):
+    data = ready()
+    frame = pd.DataFrame(rows, columns=data['info']['features'])
+    probabilities = data['model'].predict_proba(frame)[:,list(data['model'].classes_).index(1)]
+    return [dict(probability=float(p), prediction=int(p >= .5), model=data['info']['name'], version=data['info']['version'], scope='Future close-following event; not crash probability') for p in probabilities]
 
+@app.get('/api/health')
+def health(): return dict(status='ready' if bundle else 'unavailable', model_loaded=bool(bundle), detail=load_error)
 
-@app.get("/api/analytics")
-def analytics():
-    return require_bundle()["analytics"]
+@app.get('/api/model/info')
+def info(): return ready()['info']
 
+@app.get('/api/model/metrics')
+def metrics(): return ready()['metrics']
 
-@app.get("/api/model/metrics")
-def metrics():
-    return require_bundle()["metrics"]
+@app.get('/api/analytics')
+def analytics(): return ready()['analytics']
 
+@app.post('/api/predict')
+def predict(pair: Pair):
+    row = pair.model_dump()
+    invalid = support(row, ready()['info'])
+    if invalid: raise HTTPException(422, detail=f'Outside training support: {", ".join(invalid)}')
+    return infer([row])[0]
 
-@app.post("/api/predict")
-def predict(inputs: TrafficInput):
-    data = require_bundle()
-    if inputs.weather_main not in data["metrics"]["weather_categories"]:
-        raise HTTPException(422, detail="Choose one of the dataset weather categories.")
-    row = dict(
-        temp_c=inputs.temp_c,
-        rain_1h=inputs.rain_1h,
-        snow_1h=inputs.snow_1h,
-        clouds_all=inputs.clouds_all,
-        weather_main=inputs.weather_main,
-        hour=inputs.date_time.hour,
-        day_of_week=inputs.date_time.weekday(),
-        month=inputs.date_time.month,
-        is_holiday=int(inputs.is_holiday),
-    )
-    frame = pd.DataFrame([row])
-    model = data["model"]
-    prediction = int(model.predict(frame)[0])
-    probability = float(model.predict_proba(frame)[0, list(model.classes_).index(1)])
-    return {
-        "prediction": prediction,
-        "category": "High Traffic" if prediction else "Normal Traffic",
-        "high_probability": probability,
-        "normal_probability": 1 - probability,
-        "volume_threshold": data["metrics"]["volume_threshold"],
-        "decision_threshold": 0.5,
-        "model": data["metrics"]["model_name"],
-        "inputs": inputs.model_dump(mode="json"),
-        "derived": {key: row[key] for key in ["hour", "day_of_week", "month"]},
-        "scope": "Historical volume estimate; not live traffic, congestion or crash probability.",
-        "extrapolation": inputs.date_time.year > 2018,
-    }
+@app.post('/api/predict-batch')
+def predict_batch(batch: Batch):
+    data = ready()
+    results = []; valid = []
+    for item in batch.pairs:
+        row = item.inputs.model_dump()
+        invalid = support(row, data['info'])
+        if invalid: results.append(dict(id=item.id, eligible=False, reason=f'Outside training support: {", ".join(invalid)}'))
+        else: valid.append((item.id, row))
+    if valid:
+        for (pair_id, _), prediction in zip(valid, infer([row for _, row in valid])):
+            results.append(dict(id=pair_id, eligible=True, **prediction))
+    return dict(predictions=results)
