@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: trafficrush-api
+    name: nearmiss-api
     runtime: python
     plan: free
     rootDir: backend

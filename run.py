@@ -8,7 +8,7 @@ from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parent
 API = "http://127.0.0.1:8000/api/health"
-WEBSITE = "http://127.0.0.1:5173/CSE3141-Predictive-Analytics/"
+WEBSITE = "http://127.0.0.1:5173/"
 
 
 def ready(url):
@@ -17,7 +17,7 @@ def ready(url):
             body = response.read().decode("utf-8")
         if url == API:
             return json.loads(body).get("model_loaded") is True
-        return "TrafficRush" in body
+        return "NearMiss" in body
     except (OSError, ValueError):
         return False
 
@@ -27,8 +27,8 @@ def main():
     vite = ROOT / "frontend/node_modules/vite/bin/vite.js"
     if not node or not vite.exists():
         raise SystemExit("Install Node, then run npm ci inside frontend/.")
-    if not (ROOT / "backend/artifacts/traffic_model.joblib").exists():
-        raise SystemExit("First run: python scripts/make_notebook.py --execute")
+    if not (ROOT / "backend/artifacts/nearmiss.joblib").exists():
+        raise SystemExit("First run: python scripts/nearmiss_notebook.py --execute")
 
     services = [
         (
@@ -67,16 +67,16 @@ def main():
                 time.sleep(0.2)
             else:
                 raise RuntimeError(f"Service was not ready: {url}")
-        print("\nTrafficRush is running: " + WEBSITE, flush=True)
+        print("\nNearMiss is running: " + WEBSITE, flush=True)
         print("Press Ctrl+C to stop services started by this command.", flush=True)
         while True:
             if any(process.poll() is not None for process in started):
                 raise RuntimeError(
-                    "A TrafficRush service stopped. Check its output above."
+                    "A NearMiss service stopped. Check its output above."
                 )
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\nStopping TrafficRush.")
+        print("\nStopping NearMiss.")
     finally:
         for process in started:
             if process.poll() is None:

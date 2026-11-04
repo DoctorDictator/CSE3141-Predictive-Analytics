@@ -1,4 +1,4 @@
-name: Deploy TrafficRush to GitHub Pages
+name: Deploy NearMiss to GitHub Pages
 on:
   push:
     branches: [main]
