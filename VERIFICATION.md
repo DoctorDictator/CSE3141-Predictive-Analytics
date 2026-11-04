@@ -1,5 +1,15 @@
 # Verification — 4 November 2026
 
+## Frontend production regression — 5 November 2026
+
+Reproduced the live GitHub Pages blank screen: the previous traffic-volume API returned HTTP 200 for research requests, but its payload lacked NearMiss fields. Dashboard rendering threw `Cannot read properties of undefined (reading 'toFixed')` and React cleared the page. This was a runtime data-contract failure despite a successful build/deployment.
+
+The frontend now validates research and prediction responses, uses validated saved NearMiss research exports for incompatible or unavailable APIs, and provides a page-level recovery screen for unexpected rendering errors. There is no automatic page-reload loop. README includes the public website and simulator links.
+
+All **25 frontend unit/engine tests passed**. The production build was tested under `/CSE3141-Predictive-Analytics/`: **12 repeated research-page loads** against HTTP-200 legacy responses, successful saved-data fallback, correct static paths, malformed prediction handling and continuing simulation, with **zero missing assets or rendering errors**. The GitHub Pages workflow runs this production-browser regression before publication. Notebook and backend code were unchanged.
+
+## Initial implementation evidence
+
 Executed locally in `C:\Users\USER\predictive-analytics`.
 
 | Check | Actual result |

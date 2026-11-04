@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { NavLink, Routes, Route } from "react-router-dom";
+import { Component, useEffect, useRef, useState } from "react";
+import { NavLink, Routes, Route, useLocation } from "react-router-dom";
 import {
   Activity,
   ArrowRight,
@@ -55,6 +55,16 @@ import {
   event,
 } from "./simulation";
 import { request, loadResearch } from "./services/api";
+import { validatePredictions } from './services/research-schema';
+
+class PageBoundary extends Component {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) return <section className="panel methodology" role="alert"><h1>This page couldn't load.</h1><p>Try again or choose another page from the navigation.</p><Button onClick={() => this.setState({ failed: false })}>Try again</Button></section>;
+    return this.props.children;
+  }
+}
 
 const pct = (x) => `${(x * 100).toFixed(1)}%`;
 const num = (x) => Number(x).toLocaleString("en-US");
@@ -201,7 +211,7 @@ function Simulator() {
           }
           const currentPairs = observations(current),
             mapped = {};
-          for (const prediction of response.predictions) {
+          for (const prediction of validatePredictions(response).predictions) {
             const before = pairs.find((p) => p.id === prediction.id),
               now = currentPairs.find((p) => p.id === prediction.id);
             if (!before || !now || before.leaderId !== now.leaderId) continue;
@@ -1520,6 +1530,7 @@ const nav = [
   ["/about", "About", Info],
 ];
 export default function App() {
+  const location = useLocation();
   return (
     <div className="app">
       <header>
@@ -1544,6 +1555,7 @@ export default function App() {
         </span>
       </header>
       <main>
+        <PageBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/simulator" element={<Simulator />} />
@@ -1553,6 +1565,7 @@ export default function App() {
           <Route path="/about" element={<About />} />
           <Route path="*" element={<Dashboard />} />
         </Routes>
+        </PageBoundary>
       </main>
       <footer>
         <span>

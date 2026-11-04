@@ -1,3 +1,5 @@
+import { validateResearch } from './research-schema';
+
 export const API_URL = (
   import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
 ).replace(/\/$/, "");
@@ -12,19 +14,19 @@ export async function request(path, options = {}) {
 export async function loadResearch(name) {
   try {
     return {
-      data: await request(
+      data: validateResearch(name, await request(
         name === "info"
           ? "/api/model/info"
           : name === "metrics"
             ? "/api/model/metrics"
             : "/api/analytics",
-      ),
+      )),
       source: "Live API",
     };
   } catch {
-    const r = await fetch(`${import.meta.env.BASE_URL}data/${name}.json`);
+    const r = await fetch(`${import.meta.env.BASE_URL}data/${name}.json?v=nearmiss-1`);
     if (!r.ok)
       throw new Error("Research export unavailable; execute the notebook.");
-    return { data: await r.json(), source: "Saved notebook export" };
+    return { data: validateResearch(name, await r.json()), source: "Saved notebook export" };
   }
 }
