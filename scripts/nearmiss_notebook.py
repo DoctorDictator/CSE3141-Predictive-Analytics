@@ -304,10 +304,12 @@ md('''### How these findings enter the simulator
 For an approaching uncollided car, inspect both neighboring lanes, front/rear gaps, approaching rear vehicles and the entire lateral path. Empty lanes can be accepted by explicit geometry; a trained score is shown only when its real feature requirements and training ranges are met. For supported occupied-lane candidates, the actual fitted lane-change proxy model can veto a high-conflict estimate; a low estimate still needs geometric clearance. If ML is unavailable, the UI states that fact and uses conservative documented movement rules without inventing percentages. Cars already involved in simulated contact remain stopped obstacles.
 
 Six displayed lanes do not imply a six-lane NGSIM training recording. Lane IDs are omitted from the model; interactions are represented by speeds and front/rear gaps. This allows illustrative geometry on 1–8 lanes without inventing lane identifiers, but does not establish external validity for six-lane incident management.''')
-md('''## Conclusions and viva
-Explain real trajectory → current leader join → future window → current features → isolated splits → fold-fitted scaling → three syllabus models → validation selection → once-only test → export.
+md('''## Conclusion
+This project uses real NGSIM trajectories to study future close-following conditions and close-conflict proxies around observed lane changes. Logistic Regression, LDA and QDA were compared using isolated chronological partitions. Logistic Regression achieved the highest validation F1 for both tasks. The selected models obtained test F1 scores of 0.8705 for close following and 0.8333 for the lane-change proxy.
 
-The persistence baseline matters: current short headways often stay short. Strong scores can reflect persistence rather than early warning. This does not isolate new onset. Repeat across recordings for stronger evidence. No verified crash labels, causal claim or calibrated guarantee. Geometry determines simulator collisions independently.''')
+These results do not establish verified accident prediction. The following target includes persistence of an already short headway, while the lane-change study is based on a small, imbalanced sample of observed maneuvers. Baseline comparisons, uncalibrated probabilities and the absence of counterfactual outcomes limit the conclusions. Evaluation across independent recordings is needed before claiming broader generalization.
+
+The simulator combines learned conflict estimates with explicit clearance and movement rules. Its collisions are hypothetical geometric contacts, separate from the historical prediction targets. Recorded trajectories, generated scenarios and model-estimated scores must remain clearly distinguished.''')
 for i,c in enumerate(cells): c['id']=f'nearmiss-{i:02}'
 path=Path('notebooks/NearMiss.ipynb')
 path.write_text(json.dumps(dict(nbformat=4,nbformat_minor=5,metadata={'kernelspec':{'display_name':'Python 3','language':'python','name':'python3'}},cells=cells),indent=1,ensure_ascii=False),encoding='utf-8')
