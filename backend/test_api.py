@@ -97,3 +97,47 @@ def test_future_labels_use_complete_subsequent_windows():
     assert not eligible.vehicle_id.isin([3,4,5]).any()
     # Last 20 observations are not zero-labeled; they are censored.
     assert eligible.groupby('vehicle_id').size().to_dict()=={1:5,2:5}
+
+def test_lane_model_and_portable_export_match_actual_pipeline(client):
+    info=client.get('/api/lane-change/info').json()
+    assert info['version']=='nearmiss-lane-1'
+    model=joblib.load(main.ARTIFACTS/'lane_change.joblib')
+    for row in info['checks']:
+        result=client.post('/api/lane-change/predict-batch',json={'pairs':[{'id':'car:lane','inputs':row['inputs']}]}).json()['predictions'][0]
+        assert result['eligible'] is True
+        expected=model.predict_proba(pd.DataFrame([row['inputs']],columns=info['features']))[0,1]
+        assert result['probability']==pytest.approx(expected)
+        assert row['probability']==pytest.approx(expected)
+    assert client.get('/api/health').json()['lane_model_loaded'] is True
+    metrics=client.get('/api/lane-change/metrics').json()
+    assert metrics['recorded_transitions']==812
+    assert metrics['eligible_maneuvers']==481
+    assert sum(map(sum,metrics['test']['confusion_matrix']))==metrics['split_sizes']['test']
+
+def test_lane_input_and_support_validation(client):
+    row=json.loads((main.ARTIFACTS/'lane-example.json').read_text())
+    for field,value in [('front_gap',-1),('rear_speed',100),('unknown',1)]:
+        result=client.post('/api/lane-change/predict-batch',json={'pairs':[{'id':'1','inputs':{**row,field:value}}]})
+        assert result.status_code==422
+    result=client.post('/api/lane-change/predict-batch',json={'pairs':[{'id':'1','inputs':{**row,'ego_speed':50}}]}).json()['predictions'][0]
+    assert result['eligible'] is False and 'probability' not in result
+    item={'id':'1','inputs':row}
+    for pairs in [[],[item]*61,[item,item]]: assert client.post('/api/lane-change/predict-batch',json={'pairs':pairs}).status_code==422
+
+def test_lane_outcomes_use_actual_future_neighbors_and_censor_missing_data():
+    nb=json.loads(Path('notebooks/NearMiss.ipynb').read_text(encoding='utf-8'))
+    cell=next(c for c in nb['cells'] if c['cell_type']=='code' and 'lane_rows=[]' in ''.join(c['source']))
+    rows=[]
+    for frame in range(21):
+        for ego,old,new,spacing in [(1,1,2,10),(4,4,5,45)]:
+            for vehicle,lane,offset in [(ego,old if frame<10 else new,0),(ego+1,new,spacing),(ego+2,new,-45)]:
+                rows.append(dict(vehicle_id=vehicle,global_time=frame*100,lane_id=lane,local_y=100+frame+offset,local_x=float(lane)*3.7,v_length=4.6,v_vel=10))
+    ns={'df':pd.DataFrame(rows),'pd':pd,'np':np,'display':lambda *args:None}
+    exec(''.join(cell['source']),ns)
+    labels=ns['lane_data'].set_index('vehicle_id').conflict.to_dict()
+    assert labels=={1:1,4:0}
+    incomplete=pd.DataFrame(rows)
+    incomplete=incomplete[~((incomplete.vehicle_id==2)&(incomplete.global_time==1100))]
+    ns={'df':incomplete,'pd':pd,'np':np,'display':lambda *args:None}
+    with pytest.raises(AssertionError): exec(''.join(cell['source']),ns)
+    assert ns['lane_data'].vehicle_id.tolist()==[4]

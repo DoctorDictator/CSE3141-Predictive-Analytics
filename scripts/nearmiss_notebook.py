@@ -193,6 +193,117 @@ for name,value in [('info',info),('metrics',metrics),('analytics',analytics)]:
     for folder in [OUT,PUBLIC]: (folder/f'{name}.json').write_text(json.dumps(value,indent=2,allow_nan=False),encoding='utf-8')
 (OUT/'example.json').write_text(json.dumps(test[features].iloc[0].to_dict(),indent=2))
 print('Exported:',OUT)''')
+md('''## 8. Can this dataset support lane-change decisions?
+Yes, for observed maneuvers and clearly defined conflict proxies. DOT records positions every 0.1 s, with lane IDs and surrounding traffic. The full release spans three recording periods; this notebook uses one complete period. It contains **no verified accident labels**. A simulated accident/blocked six-lane road is an illustrative scenario, not a replayed NGSIM accident.
+
+We now extract actual adjacent mainline lane transitions. Assess each maneuver one second before its lane-ID crossing, using only then-current target-lane front/rear bumper gaps and three speeds. The driver may already be moving laterally at this point: this is a pre-crossing assessment, not proof of a decision made before maneuver initiation. Predict whether front or rear front-to-front headway falls below 1.5 s, or either bumper gap below 2 m, during the first second after crossing. This is an observed **close-conflict proxy**, not crash probability or a causal guarantee about an unattempted maneuver. Empty target lanes are handled by explicit simulation geometry rather than invented ML inputs.''')
+code('''# Actual lane transitions, not random labels or generated crashes.
+tracks=df.sort_values(['vehicle_id','global_time']).copy()
+previous=tracks.groupby('vehicle_id')[['lane_id','global_time']].shift()
+transitions=tracks[(tracks.lane_id-previous.lane_id).abs().eq(1)&tracks.global_time.sub(previous.global_time).eq(100)].copy()
+transitions['from_lane']=previous.lane_id.loc[transitions.index]
+lookup=tracks.set_index(['vehicle_id','global_time'])
+frames={int(t):f for t,f in tracks.groupby('global_time')}
+lane_rows=[]; lane_examples=[]
+for move in transitions.itertuples():
+    crossing=int(move.global_time); decision=crossing-1000; target_lane=int(move.lane_id)
+    times=np.arange(decision,crossing+1001,100)
+    ego=lookup.reindex(pd.MultiIndex.from_product([[move.vehicle_id],times],names=lookup.index.names))
+    if ego.local_y.isna().any() or not ego.lane_id.iloc[:10].eq(move.from_lane).all() or not ego.lane_id.iloc[10:].eq(target_lane).all(): continue
+    current=ego.iloc[0]
+    nearby=frames[decision]
+    nearby=nearby[(nearby.lane_id==target_lane)&(nearby.vehicle_id!=move.vehicle_id)]
+    front=nearby[nearby.local_y>current.local_y].sort_values('local_y').head(1)
+    rear=nearby[nearby.local_y<=current.local_y].sort_values('local_y',ascending=False).head(1)
+    if front.empty or rear.empty: continue
+    front=front.iloc[0]; rear=rear.iloc[0]
+    fg=front.local_y-front.v_length-current.local_y
+    rg=current.local_y-current.v_length-rear.local_y
+    if min(fg,rg)<=0: continue
+    after_times=times[10:]
+    f=lookup.reindex(pd.MultiIndex.from_product([[int(front.vehicle_id)],after_times],names=lookup.index.names))
+    r=lookup.reindex(pd.MultiIndex.from_product([[int(rear.vehicle_id)],after_times],names=lookup.index.names))
+    if f.local_y.isna().any() or r.local_y.isna().any() or not f.lane_id.eq(target_lane).all() or not r.lane_id.eq(target_lane).all(): continue
+    e=ego.iloc[10:]
+    front_spacing=f.local_y.to_numpy()-e.local_y.to_numpy()
+    rear_spacing=e.local_y.to_numpy()-r.local_y.to_numpy()
+    front_headway=np.divide(front_spacing,e.v_vel.to_numpy(),out=np.full(len(e),np.inf),where=e.v_vel.to_numpy()>=.5)
+    rear_headway=np.divide(rear_spacing,r.v_vel.to_numpy(),out=np.full(len(e),np.inf),where=r.v_vel.to_numpy()>=.5)
+    conflict=int(((front_headway<1.5)|(rear_headway<1.5)|(front_spacing-f.v_length.to_numpy()<2)|(rear_spacing-e.v_length.to_numpy()<2)).any())
+    lane_rows.append(dict(vehicle_id=int(move.vehicle_id),front_id=int(front.vehicle_id),rear_id=int(rear.vehicle_id),decision_time=decision,outcome_end=crossing+1000,from_lane=int(move.from_lane),target_lane=target_lane,ego_speed=float(current.v_vel),front_speed=float(front.v_vel),rear_speed=float(rear.v_vel),front_gap=float(fg),rear_gap=float(rg),conflict=conflict))
+    if len(lane_examples)<12:
+        lane_examples.append(dict(vehicle_id=int(move.vehicle_id),from_lane=int(move.from_lane),target_lane=target_lane,conflict=conflict,trace=[dict(seconds=float((t-decision)/1000),x=float(row.local_y-current.local_y),lateral=float(row.local_x),lane=int(row.lane_id)) for t,(_,row) in zip(times,ego.iterrows())]))
+lane_data=pd.DataFrame(lane_rows)
+print('Recorded adjacent transitions:',len(transitions),'Eligible observed maneuvers:',len(lane_data))
+print('Proxy outcomes:',lane_data.conflict.value_counts().to_dict())
+display(lane_data.head())
+assert lane_data.conflict.nunique()==2''')
+md('''### Isolated lane-change training
+Keep all observations of a maneuver together. Use the same chronological block boundaries, exclude crossing trajectories for ego **and both target-lane neighbors**, and keep complete outcomes inside each partition. There is one row per observed maneuver; never randomly split consecutive traffic frames. Compare the same three syllabus models with scaling fitted only on training/CV folds. The small maneuver sample and selection by drivers limit reliability; neither a low score nor the absence of a recorded proxy event proves a maneuver is safe.''')
+code('''lane_features=['ego_speed','front_speed','rear_speed','front_gap','rear_gap']
+lane_parts=[]
+for low,high in [(start,cut1),(cut1,cut2),(cut2,end+1)]:
+    ids=bounds.index[(bounds['min']>=low)&(bounds['max']<high)]
+    lane_parts.append(lane_data[lane_data.vehicle_id.isin(ids)&lane_data.front_id.isin(ids)&lane_data.rear_id.isin(ids)&(lane_data.decision_time>=low)&(lane_data.outcome_end<high)].copy())
+lt,lv,le=lane_parts
+for name,p in zip(['training','validation','test'],lane_parts): print(name,len(p),p.conflict.value_counts().to_dict())
+for a,b in [(lt,lv),(lt,le),(lv,le)]:
+    assert not set(a[['vehicle_id','front_id','rear_id']].to_numpy().ravel()) & set(b[['vehicle_id','front_id','rear_id']].to_numpy().ravel())
+assert all(p.conflict.nunique()==2 for p in lane_parts)
+# Purged expanding folds inside the lane-change training partition.
+lane_folds=[]
+for fraction in [.5,.7,.85]:
+    boundary=lt.decision_time.quantile(fraction)
+    a=lt[lt.outcome_end<boundary]; b=lt[lt.decision_time>boundary]
+    shared=set(a[['vehicle_id','front_id','rear_id']].to_numpy().ravel()) & set(b[['vehicle_id','front_id','rear_id']].to_numpy().ravel())
+    a=a[~a[['vehicle_id','front_id','rear_id']].isin(shared).any(axis=1)]
+    b=b[~b[['vehicle_id','front_id','rear_id']].isin(shared).any(axis=1)]
+    if a.conflict.nunique()==2 and b.conflict.nunique()==2:
+        lane_folds.append((np.flatnonzero(lt.index.isin(a.index)),np.flatnonzero(lt.index.isin(b.index))))
+assert len(lane_folds)>=2
+print('Purged lane-change CV:',[(len(a),len(b)) for a,b in lane_folds])
+def lane_evaluate(model,part):
+    pred=model.predict(part[lane_features]); prob=model.predict_proba(part[lane_features])[:,1]
+    return dict(accuracy=accuracy_score(part.conflict,pred),precision=precision_score(part.conflict,pred,zero_division=0),recall=recall_score(part.conflict,pred,zero_division=0),f1=f1_score(part.conflict,pred,zero_division=0),roc_auc=roc_auc_score(part.conflict,prob),confusion_matrix=confusion_matrix(part.conflict,pred).tolist())
+lane_models={}; lane_results=[]
+for name,estimator,grid in [('Logistic Regression',LogisticRegression(max_iter=2000,random_state=42),{'model__C':[.1,1,10]}),('LDA',LinearDiscriminantAnalysis(solver='lsqr'),{'model__shrinkage':['auto',.1]}),('QDA',QuadraticDiscriminantAnalysis(),{'model__reg_param':[.1,.5]})]:
+    search=GridSearchCV(Pipeline([('scale',StandardScaler()),('model',estimator)]),grid,cv=lane_folds,scoring='f1',n_jobs=1,error_score='raise')
+    search.fit(lt[lane_features],lt.conflict)
+    lane_models[name]=search.best_estimator_
+    lane_results.append(dict(name=name,cv_f1=search.best_score_,parameters=search.best_params_,training=lane_evaluate(search.best_estimator_,lt),validation=lane_evaluate(search.best_estimator_,lv)))
+display(pd.DataFrame([dict(model=r['name'],cv_f1=r['cv_f1'],**{k:v for k,v in r['validation'].items() if k!='confusion_matrix'}) for r in lane_results]))''')
+code('''lane_winner=max(lane_results,key=lambda r:(r['validation']['f1'],r['validation']['roc_auc']))
+lane_model=lane_models[lane_winner['name']]
+lane_test=lane_evaluate(lane_model,le)
+print('Selected lane-change proxy model:',lane_winner['name'],'Untouched test:',lane_test)
+print('Always-conflict test baseline F1:',f1_score(le.conflict,np.ones(len(le),dtype=int)))
+fig,axes=plt.subplots(1,2,figsize=(11,4))
+for label,p in [('No observed proxy conflict',lane_data[lane_data.conflict==0]),('Observed proxy conflict',lane_data[lane_data.conflict==1])]:
+    axes[0].scatter(p.front_gap,p.rear_gap,s=12,alpha=.5,label=label)
+axes[0].set(xlabel='Target front bumper gap at assessment (m)',ylabel='Target rear bumper gap at assessment (m)'); axes[0].legend(fontsize=8)
+sns.heatmap(lane_test['confusion_matrix'],annot=True,fmt='d',cbar=False,ax=axes[1]); axes[1].set(title='Selected lane-change model: test',xlabel='Predicted proxy',ylabel='Observed proxy')
+plt.tight_layout(); plt.show()
+# A real trajectory crosses between lanes: no synthetic crash animation is used here.
+trace=lane_examples[0]['trace']; plt.plot([p['seconds'] for p in trace],[p['lateral'] for p in trace]); plt.xlabel('Seconds since assessment'); plt.ylabel('Recorded lateral position (m)'); plt.title('An actual recorded lane transition'); plt.show()''')
+code('''lane_info=dict(name=lane_winner['name'],version='nearmiss-lane-1',features=lane_features,units={k:('m/s' if 'speed' in k else 'm bumper gap') for k in lane_features},ranges={k:[float(lt[k].min()),float(lt[k].max())] for k in lane_features},target='Observed front/rear headway below 1.5 s or bumper gap below 2 m in first second after actual lane-ID crossing; assessed 1 s before crossing',decision_threshold=.5,probability_note='Uncalibrated close-conflict proxy conditional on observed lane changes; not verified crash probability')
+lane_metrics=dict(selected_model=lane_winner['name'],comparison=lane_results,test=lane_test,baseline_f1=float(f1_score(le.conflict,np.ones(len(le),dtype=int))),split_sizes={name:len(p) for name,p in zip(['train','validation','test'],lane_parts)},recorded_transitions=len(transitions),eligible_maneuvers=len(lane_data),outcomes={str(k):int(v) for k,v in lane_data.conflict.value_counts().items()},protocol='Observed maneuvers only; chronological 60/20/20; disjoint ego and both neighbors; purged expanding training CV; validation F1 selection; once-only test',examples=lane_examples,limitations=['No verified accident labels','No counterfactual labels for unattempted maneuvers','Assessment is pre-crossing, not necessarily before lateral movement begins','Small single-recording sample; probabilities uncalibrated','An empty lane is handled by geometry, not invented model inputs'])
+# Exact fitted linear pipeline parameters enable genuine local inference when Render is cold.
+# This is the learned model, not a manually invented risk formula.
+if lane_winner['name'] in ['Logistic Regression','LDA']:
+    scale=lane_model.named_steps['scale']; linear=lane_model.named_steps['model']
+    lane_info['browser_model']=dict(kind='scaled-logit',mean=scale.mean_.tolist(),scale=scale.scale_.tolist(),coefficients=linear.coef_[0].tolist(),intercept=float(linear.intercept_[0]))
+supported_test=le[le[lane_features].ge(lt[lane_features].min()).all(axis=1)&le[lane_features].le(lt[lane_features].max()).all(axis=1)].head(8)
+assert len(supported_test)>0
+lane_info['checks']=[dict(inputs=row[lane_features].to_dict(),probability=float(lane_model.predict_proba(pd.DataFrame([row[lane_features]]))[0,1])) for _,row in supported_test.iterrows()]
+joblib.dump(lane_model,OUT/'lane_change.joblib')
+for name,value in [('lane-info',lane_info),('lane-metrics',lane_metrics)]:
+    for folder in [OUT,PUBLIC]: (folder/f'{name}.json').write_text(json.dumps(value,indent=2,allow_nan=False),encoding='utf-8')
+(OUT/'lane-example.json').write_text(json.dumps(supported_test[lane_features].iloc[0].to_dict(),indent=2))
+print('Lane-change artifact and actual recorded examples exported.')''')
+md('''### How these findings enter the simulator
+For an approaching uncollided car, inspect both neighboring lanes, front/rear gaps, approaching rear vehicles and the entire lateral path. Empty lanes can be accepted by explicit geometry; a trained score is shown only when its real feature requirements and training ranges are met. For supported occupied-lane candidates, the actual fitted lane-change proxy model can veto a high-conflict estimate; a low estimate still needs geometric clearance. If ML is unavailable, the UI states that fact and uses conservative documented movement rules without inventing percentages. Cars already involved in simulated contact remain stopped obstacles.
+
+Six displayed lanes do not imply a six-lane NGSIM training recording. Lane IDs are omitted from the model; interactions are represented by speeds and front/rear gaps. This allows illustrative geometry on 1–8 lanes without inventing lane identifiers, but does not establish external validity for six-lane incident management.''')
 md('''## Conclusions and viva
 Explain real trajectory → current leader join → future window → current features → isolated splits → fold-fitted scaling → three syllabus models → validation selection → once-only test → export.
 

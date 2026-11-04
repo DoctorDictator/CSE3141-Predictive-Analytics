@@ -13,12 +13,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ARTIFACTS = Path(os.getenv('ARTIFACT_DIR', Path(__file__).parent / 'artifacts'))
 bundle = {}
+lane_bundle = {}
 load_error = None
 
 @asynccontextmanager
 async def lifespan(app):
     global load_error
     bundle.clear()
+    lane_bundle.clear()
     try:
         loaded = {name: json.loads((ARTIFACTS / f'{name}.json').read_text(encoding='utf-8')) for name in ['info','metrics','analytics']}
         loaded['model'] = joblib.load(ARTIFACTS / 'nearmiss.joblib')
@@ -28,6 +30,13 @@ async def lifespan(app):
         load_error = None
     except Exception as exc:
         load_error = f'Model unavailable ({type(exc).__name__}). Execute notebooks/NearMiss.ipynb.'
+    try:
+        lane_info=json.loads((ARTIFACTS/'lane-info.json').read_text(encoding='utf-8'))
+        lane_model=joblib.load(ARTIFACTS/'lane_change.joblib')
+        if list(lane_model.feature_names_in_)!=lane_info['features']: raise ValueError('Lane schema mismatch')
+        lane_bundle.update(info=lane_info,model=lane_model,metrics=json.loads((ARTIFACTS/'lane-metrics.json').read_text(encoding='utf-8')))
+    except Exception:
+        lane_bundle.clear()
     yield
 
 app = FastAPI(title='NearMiss API', version='1.0.0', lifespan=lifespan)
@@ -82,7 +91,7 @@ def infer(rows):
     return [dict(probability=float(p), prediction=int(p >= .5), model=data['info']['name'], version=data['info']['version'], scope='Future close-following event; not crash probability') for p in probabilities]
 
 @app.get('/api/health')
-def health(): return dict(status='ready' if bundle else 'unavailable', model_loaded=bool(bundle), detail=load_error)
+def health(): return dict(status='ready' if bundle else 'unavailable', model_loaded=bool(bundle), lane_model_loaded=bool(lane_bundle), detail=load_error)
 
 @app.get('/api/model/info')
 def info(): return ready()['info']
@@ -112,4 +121,49 @@ def predict_batch(batch: Batch):
     if valid:
         for (pair_id, _), prediction in zip(valid, infer([row for _, row in valid])):
             results.append(dict(id=pair_id, eligible=True, **prediction))
+    return dict(predictions=results)
+
+class LaneInput(BaseModel):
+    model_config=ConfigDict(extra='forbid',allow_inf_nan=False)
+    ego_speed: float=Field(ge=0,le=55)
+    front_speed: float=Field(ge=0,le=55)
+    rear_speed: float=Field(ge=0,le=55)
+    front_gap: float=Field(gt=0,le=2000)
+    rear_gap: float=Field(gt=0,le=2000)
+
+class LaneItem(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    id: str=Field(min_length=1,max_length=50)
+    inputs: LaneInput
+
+class LaneBatch(BaseModel):
+    model_config=ConfigDict(extra='forbid')
+    pairs: list[LaneItem]=Field(min_length=1,max_length=60)
+
+    @model_validator(mode='after')
+    def unique_ids(self):
+        if len({p.id for p in self.pairs})!=len(self.pairs): raise ValueError('Candidate IDs must be unique.')
+        return self
+
+def lane_ready():
+    if not lane_bundle: raise HTTPException(503,detail='Lane-change model unavailable. Execute NearMiss.ipynb.')
+    return lane_bundle
+
+@app.get('/api/lane-change/info')
+def lane_info(): return lane_ready()['info']
+
+@app.get('/api/lane-change/metrics')
+def lane_metrics(): return lane_ready()['metrics']
+
+@app.post('/api/lane-change/predict-batch')
+def lane_predictions(batch: LaneBatch):
+    data=lane_ready(); results=[]; valid=[]
+    for item in batch.pairs:
+        row=item.inputs.model_dump(); invalid=support(row,data['info'])
+        if invalid: results.append(dict(id=item.id,eligible=False,reason=f'Outside training support: {", ".join(invalid)}'))
+        else: valid.append((item.id,row))
+    if valid:
+        frame=pd.DataFrame([row for _,row in valid],columns=data['info']['features'])
+        probabilities=data['model'].predict_proba(frame)[:,list(data['model'].classes_).index(1)]
+        results.extend(dict(id=pair_id,eligible=True,probability=float(p),model=data['info']['name'],version=data['info']['version'],scope='Observed lane-change close-conflict proxy; not crash probability') for (pair_id,_),p in zip(valid,probabilities))
     return dict(predictions=results)
