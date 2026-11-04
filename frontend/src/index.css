@@ -971,3 +971,108 @@ footer b {
     width: 100%;
   }
 }
+.lane-banner {
+  padding: 16px 20px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+.lane-banner strong {
+  font-size: 13px;
+}
+.lane-banner p {
+  font-size: 11px;
+  margin-top: 4px;
+}
+.lane-assessment {
+  padding: 13px 0;
+  border-top: 1px solid #e4ecdf;
+  border-bottom: 1px solid #e4ecdf;
+  margin: 16px 0;
+}
+.lane-assessment h2 {
+  font-size: 12px;
+  margin-bottom: 7px;
+}
+.lane-option {
+  padding: 11px;
+  border: 1px solid #e2e7dd;
+  border-radius: 7px;
+  margin: 9px 0;
+  background: #f9faf6;
+}
+.lane-option strong {
+  display: block;
+  font-size: 11px;
+}
+.lane-option p {
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 5px 0;
+}
+.lane-option small {
+  display: block;
+  font-size: 9px;
+  color: #85917c;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.lane-option b {
+  display: block;
+  font-size: 10px;
+  color: #277a65;
+  margin: 7px 0 3px;
+}
+.lane-clear {
+  border-color: #c9e1cd;
+  background: #f2f8ee;
+}
+.lane-wait {
+  border-color: #eadfca;
+  background: #fdfaf4;
+}
+.recorded-maneuver {
+  padding: 20px;
+  margin-top: 20px;
+  max-width: 700px;
+}
+.recorded-maneuver p {
+  font-size: 11px;
+}
+.recorded-maneuver .field {
+  margin-top: 15px;
+}
+.recorded-maneuver svg {
+  display: block;
+  width: 100%;
+  height: 160px;
+  border-radius: 7px;
+  margin: 15px 0;
+}
+.recorded-maneuver input[type="range"] {
+  width: 100%;
+}
+.lane-research {
+  margin-bottom: 22px;
+}
+.lane-research > div {
+  display: block;
+  margin-top: 14px;
+}
+.live-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 760px) {
+  .live-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lane-banner {
+    padding: 15px;
+  }
+  .lane-banner button {
+    width: 100%;
+  }
+}

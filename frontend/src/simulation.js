@@ -1,4 +1,5 @@
 // Metres, seconds, front-bumper longitudinal coordinates. Geometry is independent of ML.
+import { inferLaneModel } from "./services/lane-inference.js";
 export const LANE_WIDTH = 3.7;
 export const STEP = 1 / 120;
 export const SCENARIOS = [
@@ -8,6 +9,8 @@ export const SCENARIOS = [
   "Heavy Traffic",
   "Rear-End Collision Demo",
   "Multiple-Vehicle Incident",
+  "Six-Lane Blockage - Safe Bypass",
+  "Blocked Lane - No Safe Gap",
 ];
 const clone = (x) => structuredClone(x);
 export function random(seed) {
@@ -64,6 +67,8 @@ export function createWorld(lanes = 3, count = 6, seed = 42) {
     events: [],
     collisions: [],
     laneChanges: 0,
+    completedLaneChanges: 0,
+    laneScores: {},
     nextId: count + 1,
     mode: "Manual Traffic",
     avoidance: true,
@@ -92,6 +97,8 @@ export function reset(w) {
     events: [],
     collisions: [],
     laneChanges: 0,
+    completedLaneChanges: 0,
+    laneScores: {},
     history: [],
     historyClock: 0,
     epoch: w.epoch + 1,
@@ -141,6 +148,162 @@ export function changeLane(w, car, lane) {
   );
   return true;
 }
+
+export function laneAssessment(w, car, lane) {
+  const result = {
+    lane,
+    clear: false,
+    reason: "",
+    front: null,
+    rear: null,
+    probability: null,
+    modelSource: "Clearance rules",
+  };
+  if (lane < 0 || lane >= w.lanes || Math.abs(lane - car.lane) !== 1)
+    return { ...result, reason: "No adjacent lane" };
+  if (car.crashed)
+    return {
+      ...result,
+      reason: "Vehicle already collided; rewind before impact",
+    };
+  if (car.changing) return { ...result, reason: "Lane change in progress" };
+  const y = (lane + 0.5) * LANE_WIDTH;
+  const occupants = w.cars.filter(
+    (o) =>
+      o.id !== car.id &&
+      (Math.abs(o.y - y) < LANE_WIDTH * 0.8 ||
+        (o.changing && o.targetLane === lane)),
+  );
+  result.empty = occupants.length === 0;
+  result.front =
+    occupants.filter((o) => o.x > car.x).sort((a, b) => a.x - b.x)[0] || null;
+  result.rear =
+    occupants.filter((o) => o.x <= car.x).sort((a, b) => b.x - a.x)[0] || null;
+  const frontGap = result.front
+    ? result.front.x - result.front.length - car.x
+    : null;
+  const rearGap = result.rear ? car.x - car.length - result.rear.x : null;
+  result.frontGap = frontGap;
+  result.rearGap = rearGap;
+  result.key = `${car.id}:${lane}`;
+  result.signature = `${result.front?.id ?? "-"}:${result.rear?.id ?? "-"}`;
+  if (result.front && result.rear && frontGap > 0 && rearGap > 0)
+    result.inputs = {
+      ego_speed: car.speed,
+      front_speed: result.front.speed,
+      rear_speed: result.rear.speed,
+      front_gap: frontGap,
+      rear_gap: rearGap,
+    };
+  const score = w.laneScores?.[result.key];
+  if (
+    result.inputs &&
+    score?.eligible &&
+    score.signature === result.signature &&
+    w.time >= score.at &&
+    w.time - score.at < 2.5 &&
+    Date.now() - score.wall < 5000
+  ) {
+    result.probability = score.probability;
+    result.modelSource = `${score.model} fitted on recorded lane changes`;
+  } else if (result.inputs && w.laneModel) {
+    const local = inferLaneModel(w.laneModel, result.inputs);
+    if (local.eligible) {
+      result.probability = local.probability;
+      result.modelSource = `Saved fitted ${w.laneModel.name} (local inference)`;
+    } else result.modelReason = local.reason;
+  }
+  if (
+    result.front &&
+    frontGap <
+      Math.max(3, car.speed * 1.2, (car.speed - result.front.speed) * 2)
+  )
+    return { ...result, reason: "Front gap is too small or closing" };
+  if (
+    result.rear &&
+    rearGap <
+      Math.max(3, result.rear.speed * 1.2, (result.rear.speed - car.speed) * 2)
+  )
+    return {
+      ...result,
+      reason: "Rear vehicle is too close or approaching quickly",
+    };
+  // Check the full 1.6 s path, including the present-lane obstacle and other lane changers.
+  for (let t = 0; t <= 1.6001; t += 0.1) {
+    const fraction = t / 1.6,
+      smooth = fraction * fraction * (3 - 2 * fraction);
+    const projected = {
+      ...car,
+      x: car.x + car.speed * t,
+      y: car.y + (y - car.y) * smooth,
+      length: car.length + 1,
+      width: car.width + 0.2,
+    };
+    for (const other of w.cars) {
+      if (other.id === car.id) continue;
+      let otherY = other.y;
+      if (other.changing) {
+        const f = Math.min(1, (other.changeTime + t) / 1.6);
+        otherY = other.fromY + (other.toY - other.fromY) * f * f * (3 - 2 * f);
+      }
+      if (
+        overlap(projected, {
+          ...other,
+          x: other.x + other.speed * t,
+          y: otherY,
+          length: other.length + 1,
+          width: other.width + 0.2,
+        })
+      )
+        return {
+          ...result,
+          reason: "Vehicle body intersects the predicted lane-change path",
+        };
+    }
+  }
+  if (result.probability != null && result.probability >= 0.5)
+    return {
+      ...result,
+      reason: "Model estimates elevated close-conflict likelihood",
+    };
+  return {
+    ...result,
+    clear: true,
+    reason: result.empty
+      ? "Empty adjacent lane; projected path clear"
+      : result.probability != null
+        ? "Lower model conflict score and geometric clearance"
+        : result.inputs
+          ? "Geometric clearance; learned score unavailable"
+          : "Geometric clearance; model needs both target-lane neighbors",
+  };
+}
+
+export function requestLaneChange(w, car, lane) {
+  const assessment = laneAssessment(w, car, lane);
+  car.laneDecision = {
+    ...assessment,
+    front: assessment.front?.id,
+    rear: assessment.rear?.id,
+    time: w.time,
+  };
+  if (w.avoidance && !assessment.clear) {
+    event(w, `Vehicle ${car.id} waits: ${assessment.reason}`, "decision");
+    return false;
+  }
+  return changeLane(w, car, lane);
+}
+
+export function laneObservations(w) {
+  return w.cars
+    .filter((c) => !c.crashed && !c.changing)
+    .flatMap((c) =>
+      [c.lane - 1, c.lane + 1].map((l) => laneAssessment(w, c, l)),
+    )
+    .filter((a) => a.inputs)
+    .map((a) => ({ id: a.key, signature: a.signature, inputs: a.inputs }))
+    .slice(0, 60);
+}
 export function setLanes(w, lanes) {
   w.lanes = lanes;
   // Old snapshots refer to different road geometry and must not be replayed.
@@ -185,6 +348,7 @@ export function addCar(w) {
   return null;
 }
 export function loadScenario(w, name) {
+  const laneModel = w.laneModel;
   Object.assign(
     w,
     createWorld(
@@ -193,12 +357,17 @@ export function loadScenario(w, name) {
       42,
     ),
   );
+  w.laneModel = laneModel;
   if (name === "Normal Highway Traffic")
     w.cars.forEach((c) => {
       c.speed = 14 + c.lane * 2;
       c.desired = c.speed;
       c.accel = 0;
     });
+  if (name === "Normal Highway Traffic") {
+    w.mode = "Automatic Traffic";
+    w.autoLane = true;
+  }
   if (name === "Heavy Traffic") {
     w.cars.forEach((c, i) => {
       c.x = 25 + Math.floor(i / 4) * 18 + c.lane * 2;
@@ -230,6 +399,30 @@ export function loadScenario(w, name) {
       vehicle(3, 1, 35, 23),
       vehicle(4, 0, 65, 15),
     ];
+  if (name === "Six-Lane Blockage - Safe Bypass") {
+    w.lanes = 6;
+    w.mode = "Automatic Traffic";
+    w.autoLane = true;
+    w.cars = [
+      vehicle(1, 2, 130, 0, { desired: 0, type: "Stopped obstacle" }),
+      vehicle(2, 2, 65, 14, { desired: 18 }),
+      vehicle(3, 0, 80, 16),
+      vehicle(4, 1, 110, 17),
+      vehicle(5, 4, 75, 18),
+      vehicle(6, 5, 95, 16),
+    ];
+  }
+  if (name === "Blocked Lane - No Safe Gap") {
+    w.lanes = 3;
+    w.mode = "Automatic Traffic";
+    w.autoLane = true;
+    w.cars = [
+      vehicle(1, 1, 100, 0, { desired: 0, type: "Stopped obstacle" }),
+      vehicle(2, 1, 45, 12, { desired: 16 }),
+      vehicle(3, 0, 100, 0, { desired: 0, type: "Stopped obstacle" }),
+      vehicle(4, 2, 100, 0, { desired: 0, type: "Stopped obstacle" }),
+    ];
+  }
   w.avoidance = ![
     "Rear-End Collision Demo",
     "Unsafe Lane Change",
@@ -255,6 +448,10 @@ export function tick(w, dt = STEP) {
       c.accel = 0;
       delete c.brakeUntil;
     }
+    if (c.manualAccelUntil && w.time >= c.manualAccelUntil) {
+      delete c.manualAccelUntil;
+      c.accel = 0;
+    }
     let a = c.accel;
     if (w.mode === "Manual Traffic" && c.targetActive && !c.brakeUntil) {
       a = Math.max(-4, Math.min(2.5, (c.desired - c.speed) * 1.5));
@@ -264,26 +461,67 @@ export function tick(w, dt = STEP) {
         a = 0;
       }
     }
-    if (w.mode === "Automatic Traffic" && !c.brakeUntil) {
+    if (
+      w.mode === "Automatic Traffic" &&
+      !c.brakeUntil &&
+      !c.manualAccelUntil
+    ) {
       const ahead = leader(w, c);
       a = Math.max(-2, Math.min(1.4, (c.desired - c.speed) * 0.5));
       if (w.avoidance && ahead) {
         const gap = ahead.x - ahead.length - c.x;
         if (gap < Math.max(5, c.speed * 1.7))
           a = -Math.min(8, 2 + Math.max(0, c.speed - ahead.speed));
-        if (w.autoLane && gap < c.speed * 1.4 && !c.changing) {
-          const target = [c.lane - 1, c.lane + 1].find(
-            (l) =>
-              l >= 0 &&
-              l < w.lanes &&
-              w.cars.every(
-                (o) =>
-                  o.id === c.id ||
-                  Math.abs(o.y - (l + 0.5) * LANE_WIDTH) > LANE_WIDTH * 0.8 ||
-                  Math.abs(o.x - c.x) > Math.max(20, c.speed * 1.5),
-              ),
-          );
-          if (target != null) changeLane(w, c, target);
+        const closing = Math.max(0, c.speed - ahead.speed);
+        const obstructed =
+          gap < Math.max(12, c.speed * 3, closing * 4 + 8) &&
+          (ahead.speed < c.desired - 1 || gap < Math.max(5, c.speed * 1.5));
+        if (
+          w.autoLane &&
+          obstructed &&
+          !c.changing &&
+          (c.nextLaneCheck ?? 0) <= w.time
+        ) {
+          c.nextLaneCheck = w.time + 0.4;
+          const options = [c.lane - 1, c.lane + 1]
+            .filter((l) => l >= 0 && l < w.lanes)
+            .map((l) => laneAssessment(w, c, l));
+          const available = options
+            .filter(
+              (o) =>
+                o.clear &&
+                (!o.front ||
+                  o.front.speed > ahead.speed + 1 ||
+                  o.frontGap > gap + 10),
+            )
+            .sort(
+              (x, y) =>
+                Number(y.empty) - Number(x.empty) ||
+                (x.probability ?? 0) - (y.probability ?? 0),
+            );
+          const chosen = available[0];
+          const reason =
+            chosen?.reason ||
+            options.find((o) => !o.clear)?.reason ||
+            "Adjacent lanes offer no progress advantage";
+          c.laneDecision = {
+            lane: chosen?.lane ?? null,
+            clear: !!chosen,
+            reason,
+            probability: chosen?.probability ?? null,
+            time: w.time,
+          };
+          if (chosen) {
+            event(
+              w,
+              `Vehicle ${c.id} assessed Lane ${chosen.lane + 1}: ${reason}`,
+              "decision",
+            );
+            changeLane(w, c, chosen.lane);
+          } else if (c.lastWaitReason !== reason) {
+            event(w, `Vehicle ${c.id} waits/brakes: ${reason}`, "decision");
+            c.lastWaitReason = reason;
+          }
         }
       }
     }
@@ -299,6 +537,7 @@ export function tick(w, dt = STEP) {
       if (t === 1) {
         c.lane = c.targetLane;
         c.changing = false;
+        c.completedLane = c.lane;
       }
     }
   }
@@ -331,6 +570,18 @@ export function tick(w, dt = STEP) {
         "collision",
       );
     }
+  for (const c of w.cars)
+    if (c.completedLane != null) {
+      if (!c.crashed) {
+        w.completedLaneChanges = (w.completedLaneChanges ?? 0) + 1;
+        event(
+          w,
+          `Vehicle ${c.id} completed change to Lane ${c.completedLane + 1} with no simulated contact`,
+          "lane",
+        );
+      }
+      delete c.completedLane;
+    }
   w.historyClock += dt;
   if (w.historyClock >= 0.1) {
     w.historyClock = 0;
@@ -341,6 +592,7 @@ export function tick(w, dt = STEP) {
         events: w.events,
         collisions: w.collisions,
         laneChanges: w.laneChanges,
+        completedLaneChanges: w.completedLaneChanges,
       }),
     );
     if (w.history.length > 150) w.history.shift();
@@ -357,6 +609,7 @@ export function rewind(w) {
   }
   Object.assign(w, clone(state));
   w.history = [];
+  w.laneScores = {};
   w.epoch++;
 }
 export function observations(w) {

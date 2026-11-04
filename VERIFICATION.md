@@ -1,5 +1,15 @@
 # Verification — 4 November 2026
 
+## Blocked-lane avoidance and observed-maneuver ML — 5 November 2026
+
+Fixed the speed-dependent automatic-lane trigger that could leave an uncollided stopped follower stuck behind an obstacle. The normal frontend preset enables automatic bypass; explicit controls show whether it is enabled. Added early congestion detection, zero-speed reassessment, front/rear clearance, rear closing-speed checks, projected lateral path checks, simultaneous-merge reservations and progress-advantage checks. Completion events are recorded after contact detection, so a collision in the completion step cannot be mislabeled as a successful maneuver.
+
+The 33-cell notebook executed in full. It found 812 actual adjacent mainline lane transitions, retaining 481 complete observed maneuvers. Separate lane-change Logistic Regression/LDA/QDA training uses five pre-crossing inputs, isolated chronological partitions (296/78/49), purged training CV and actual future close-conflict proxy labels. Selected Logistic Regression test F1 is 0.8333 versus always-conflict baseline 0.7901; ROC-AUC is 0.9099. These results are based on just 49 test maneuvers and are not verified crash prediction or counterfactual safety evidence.
+
+**40 frontend tests and 20 API/notebook tests passed.** Coverage includes the zero-speed empty-lane case, safe six-lane bypass, all-lanes-blocked waiting, fast rear traffic, an unsafe lateral path despite an empty target lane, simultaneous merging, already-collided obstacles, model veto, stale neighbor identity and acceleration overrides. Exact browser fitted-model outputs match held-out scikit-learn predictions to `1e-12`; no probability is invented for unsupported inputs. API outputs match the same joblib artifact. Controlled future-window tests verify actual outcomes and exclusion of missing observations.
+
+The production browser test passed under the GitHub Pages subpath with legacy API responses: safe bypass with no contact, waiting when blocked, a visible genuine local fitted score, deliberate unsafe contact, actual recorded-trajectory playback, mobile layout and no render/missing-asset errors. The original full browser smoke workflow also passed with 12 successful actual following-pair inference batches. Desktop and mobile screenshots were inspected. The API supports the new lane-change model independently; simulation and portable lane-change inference remain usable during a backend cold start.
+
 ## Frontend production regression — 5 November 2026
 
 Reproduced the live GitHub Pages blank screen: the previous traffic-volume API returned HTTP 200 for research requests, but its payload lacked NearMiss fields. Dashboard rendering threw `Cannot read properties of undefined (reading 'toFixed')` and React cleared the page. This was a runtime data-contract failure despite a successful build/deployment.

@@ -53,15 +53,29 @@ import {
   rewind,
   observations,
   event,
+  laneAssessment,
+  requestLaneChange,
+  laneObservations,
 } from "./simulation";
 import { request, loadResearch } from "./services/api";
-import { validatePredictions } from './services/research-schema';
+import { validatePredictions } from "./services/research-schema";
 
 class PageBoundary extends Component {
   state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
   render() {
-    if (this.state.failed) return <section className="panel methodology" role="alert"><h1>This page couldn't load.</h1><p>Try again or choose another page from the navigation.</p><Button onClick={() => this.setState({ failed: false })}>Try again</Button></section>;
+    if (this.state.failed)
+      return (
+        <section className="panel methodology" role="alert">
+          <h1>This page couldn't load.</h1>
+          <p>Try again or choose another page from the navigation.</p>
+          <Button onClick={() => this.setState({ failed: false })}>
+            Try again
+          </Button>
+        </section>
+      );
     return this.props.children;
   }
 }
@@ -119,6 +133,10 @@ function Simulator() {
     [running, setRunning] = useState(false),
     runRef = useRef(false),
     [version, render] = useState(0);
+  const { data: laneInfo, source: laneSource } = useResearch("lane-info");
+  useEffect(() => {
+    w.laneModel = laneInfo;
+  }, [laneInfo]);
   const [count, setCount] = useState(6),
     [seed, setSeed] = useState("42"),
     [scenario, setScenario] = useState(SCENARIOS[0]);
@@ -138,6 +156,7 @@ function Simulator() {
     generation.current++;
     scoreRef.current = {};
     lastElevated.current = new Set();
+    w.laneScores = {};
     setScores({});
   };
   const mutate = (fn) => {
@@ -175,6 +194,65 @@ function Simulator() {
     };
     frame = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(frame);
+  }, []);
+  useEffect(() => {
+    let disposed = false,
+      timer,
+      controller;
+    const poll = async () => {
+      const current = world.current,
+        candidates = laneObservations(current),
+        stamp = generation.current,
+        epoch = current.epoch;
+      if (candidates.length) {
+        controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        try {
+          const response = validatePredictions(
+            await request("/api/lane-change/predict-batch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              signal: controller.signal,
+              body: JSON.stringify({
+                pairs: candidates.map(({ id, inputs }) => ({ id, inputs })),
+              }),
+            }),
+          );
+          if (
+            !disposed &&
+            stamp === generation.current &&
+            epoch === current.epoch
+          ) {
+            const now = laneObservations(current),
+              next = {};
+            for (const p of response.predictions) {
+              const before = candidates.find((c) => c.id === p.id),
+                after = now.find((c) => c.id === p.id);
+              if (before && after && before.signature === after.signature)
+                next[p.id] = {
+                  ...p,
+                  signature: after.signature,
+                  at: current.time,
+                  wall: Date.now(),
+                };
+            }
+            current.laneScores = next;
+          }
+        } catch {
+          if (!disposed && stamp === generation.current)
+            current.laneScores = {};
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+      if (!disposed) timer = setTimeout(poll, 1000);
+    };
+    poll();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      controller?.abort();
+    };
   }, []);
   useEffect(() => {
     let disposed = false,
@@ -273,6 +351,11 @@ function Simulator() {
   };
   const car = w.cars.find((c) => c.id === selected),
     ahead = car && leader(w, car);
+  const laneOptions = car
+    ? [car.lane - 1, car.lane + 1]
+        .filter((l) => l >= 0 && l < w.lanes)
+        .map((l) => laneAssessment(w, car, l))
+    : [];
   const valid = w.cars.map(freshScore).filter((s) => s?.eligible),
     average =
       w.cars.reduce((a, c) => a + c.speed, 0) / Math.max(1, w.cars.length);
@@ -305,6 +388,8 @@ function Simulator() {
       w.collisions = [];
       w.history = [];
       w.laneChanges = 0;
+      w.completedLaneChanges = 0;
+      w.historyClock = 0;
       w.nextId = count + 1;
       saveInitial(w);
     });
@@ -327,6 +412,28 @@ function Simulator() {
           <i />
           {apiStatus}
         </span>
+      </div>
+      <div className="lane-banner panel">
+        <div>
+          <strong>Can the car get around a blocked lane?</strong>
+          <p>
+            Assess the target lane, watch the maneuver, then check whether
+            contact occurred.
+          </p>
+        </div>
+        <Button
+          className="primary"
+          onClick={() => {
+            setRunning(false);
+            mutate(() => loadScenario(w, "Six-Lane Blockage - Safe Bypass"));
+            setScenario("Six-Lane Blockage - Safe Bypass");
+            setCount(w.cars.length);
+            select(2);
+            setPan(0);
+          }}
+        >
+          Six-lane bypass demo
+        </Button>
       </div>
       <div className="sim-layout">
         <aside className="panel config">
@@ -399,7 +506,7 @@ function Simulator() {
               setRunning(false);
               mutate(() => loadScenario(w, scenario));
               setCount(w.cars.length);
-              select(w.cars[0].id);
+              select(w.cars.find((c) => c.speed > 0)?.id || w.cars[0].id);
               setPan(0);
             }}
           >
@@ -433,9 +540,10 @@ function Simulator() {
             Automatic lane decisions
           </label>
           <p className="micro">
-            Automatic rules cruise toward a target speed, brake for short gaps
-            and change lanes only when clear. Manual controls override braking
-            for 3 seconds.
+            Automatic mode checks adjacent lanes before stopping, including an
+            empty lane. Geometry checks the full path; a supported fitted-model
+            score can veto an elevated close-conflict estimate. Already-collided
+            cars remain obstacles.
           </p>
         </aside>
         <section className="simulation-main">
@@ -827,6 +935,7 @@ function Simulator() {
             </div>
           )}
           <div className="live-stats">
+            <Stat label="Number of lanes" value={w.lanes} />
             <Stat label="Active vehicles" value={w.cars.length} />
             <Stat
               label="Average speed"
@@ -838,6 +947,10 @@ function Simulator() {
             />
             <Stat label="Simulated contacts" value={w.collisions.length} />
             <Stat label="Valid model scores" value={valid.length} />
+            <Stat
+              label="Lane changes completed"
+              value={w.completedLaneChanges ?? 0}
+            />
             <Stat
               label="Highest score"
               value={
@@ -934,6 +1047,82 @@ function Simulator() {
                   </b>
                 </div>
               </div>
+              <div className="lane-assessment" data-testid="lane-assessment">
+                <h2>Lane-change assessment</h2>
+                <p className="micro">
+                  {w.mode === "Automatic Traffic" && w.autoLane && w.avoidance
+                    ? "Automatic bypass enabled"
+                    : "Automatic bypass is off"}
+                </p>
+                {!(
+                  w.mode === "Automatic Traffic" &&
+                  w.autoLane &&
+                  w.avoidance
+                ) && (
+                  <Button
+                    className="full"
+                    onClick={() =>
+                      mutate(() => {
+                        w.mode = "Automatic Traffic";
+                        w.autoLane = true;
+                        w.avoidance = true;
+                      })
+                    }
+                  >
+                    Enable automatic bypass
+                  </Button>
+                )}
+                {laneOptions.map((option) => (
+                  <div
+                    className={`lane-option ${option.clear ? "lane-clear" : "lane-wait"}`}
+                    key={option.lane}
+                  >
+                    <strong>
+                      Lane {option.lane + 1}:{" "}
+                      {car.changing
+                        ? "Changing lane"
+                        : option.clear
+                          ? "Clear to attempt"
+                          : "Wait"}
+                    </strong>
+                    <p>{option.reason}</p>
+                    <small>
+                      Front gap:{" "}
+                      {option.frontGap != null
+                        ? `${option.frontGap.toFixed(1)} m`
+                        : "no vehicle"}{" "}
+                      · Rear gap:{" "}
+                      {option.rearGap != null
+                        ? `${option.rearGap.toFixed(1)} m`
+                        : "no vehicle"}
+                    </small>
+                    {option.probability != null ? (
+                      <>
+                        <b>
+                          Learned close-conflict score:{" "}
+                          {pct(option.probability)}
+                        </b>
+                        <small>{option.modelSource}</small>
+                      </>
+                    ) : (
+                      <small>
+                        {option.modelReason ||
+                          "No fitted score for this configuration; geometric assessment shown."}
+                      </small>
+                    )}
+                  </div>
+                ))}
+                {car.laneDecision && (
+                  <p className="micro">
+                    Last decision: {car.laneDecision.reason}
+                  </p>
+                )}
+                <p className="micro">
+                  Learned scores use actual recorded lane changes. They are not
+                  verified crash probabilities.{" "}
+                  {laneInfo ? laneSource : "Loading fitted lane model…"}
+                </p>
+              </div>
               <div className="risk-box">
                 <span>FUTURE CLOSE-FOLLOWING SCORE</span>
                 <strong>
@@ -982,6 +1171,8 @@ function Simulator() {
                     mutate(() => {
                       car.accel = Math.max(-8, Math.min(4, +e.target.value));
                       car.actualAccel = car.accel;
+                      car.manualAccelUntil =
+                        w.mode === "Automatic Traffic" ? w.time + 3 : undefined;
                       car.targetActive = false;
                     })
                   }
@@ -1013,7 +1204,9 @@ function Simulator() {
                 <Button
                   icon={ChevronLeft}
                   disabled={car.lane === 0 || car.changing || car.crashed}
-                  onClick={() => mutate(() => changeLane(w, car, car.lane - 1))}
+                  onClick={() =>
+                    mutate(() => requestLaneChange(w, car, car.lane - 1))
+                  }
                 >
                   Left lane
                 </Button>
@@ -1022,7 +1215,9 @@ function Simulator() {
                   disabled={
                     car.lane === w.lanes - 1 || car.changing || car.crashed
                   }
-                  onClick={() => mutate(() => changeLane(w, car, car.lane + 1))}
+                  onClick={() =>
+                    mutate(() => requestLaneChange(w, car, car.lane + 1))
+                  }
                 >
                   Right lane
                 </Button>
@@ -1305,6 +1500,162 @@ function Analysis() {
     </>
   );
 }
+function RecordedManeuver({ data }) {
+  const [selected, setSelected] = useState(0),
+    [index, setIndex] = useState(0),
+    [playing, setPlaying] = useState(false);
+  const example = data.examples[selected],
+    trace = example?.trace || [];
+  useEffect(() => {
+    if (!playing) return;
+    const timer = setInterval(
+      () => setIndex((i) => (i + 1) % trace.length),
+      200,
+    );
+    return () => clearInterval(timer);
+  }, [playing, trace.length]);
+  if (!trace.length) return null;
+  const point = trace[Math.min(index, trace.length - 1)],
+    minY = Math.min(...trace.map((p) => p.lateral)) - 3.5,
+    maxY = Math.max(...trace.map((p) => p.lateral)) + 3.5,
+    width = Math.max(35, ...trace.map((p) => p.x + 10));
+  return (
+    <div className="panel recorded-maneuver">
+      <h2>Replay an actual NGSIM lane transition</h2>
+      <p>
+        Recorded positions, 0.1 s apart. This is trajectory evidence, not a
+        recorded accident.
+      </p>
+      <Field label="Recorded maneuver">
+        <select
+          aria-label="Recorded maneuver"
+          value={selected}
+          onChange={(e) => {
+            setSelected(+e.target.value);
+            setIndex(0);
+          }}
+        >
+          {data.examples.map((e, i) => (
+            <option key={i} value={i}>
+              Vehicle {e.vehicle_id}: Lane {e.from_lane} to {e.target_lane}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <svg
+        role="img"
+        aria-label="Actual recorded lane-change positions"
+        viewBox={`-5 ${minY} ${width} ${maxY - minY}`}
+      >
+        <rect
+          x="-5"
+          y={minY}
+          width={width}
+          height={maxY - minY}
+          fill="#263e33"
+        />
+        <line
+          x1="-5"
+          x2={width}
+          y1={(minY + maxY) / 2}
+          y2={(minY + maxY) / 2}
+          stroke="#bdccbd"
+          strokeWidth=".1"
+          strokeDasharray="2 2"
+        />
+        <polyline
+          points={trace.map((p) => `${p.x},${p.lateral}`).join(" ")}
+          fill="none"
+          stroke="#72c1a4"
+          strokeWidth=".12"
+          strokeDasharray=".4 .4"
+        />
+        <rect
+          x={point.x - 4.6}
+          y={point.lateral - 0.9}
+          width="4.6"
+          height="1.8"
+          rx=".3"
+          fill="#58dab3"
+        />
+      </svg>
+      <div className="button-row">
+        <Button onClick={() => setPlaying(!playing)}>
+          {playing ? "Pause recorded replay" : "Play recorded replay"}
+        </Button>
+        <span className="micro">
+          {point.seconds.toFixed(1)} s · recorded Lane {point.lane}
+        </span>
+      </div>
+      <input
+        aria-label="Recorded replay time"
+        type="range"
+        min="0"
+        max={trace.length - 1}
+        step="1"
+        value={index}
+        onChange={(e) => setIndex(+e.target.value)}
+      />
+      <p className="micro">
+        Observed proxy conflict after crossing:{" "}
+        {example.conflict ? "Yes" : "No"}. Lane boundary and vehicle size are
+        illustrative; the plotted position samples are real. No verified
+        collision label is available.
+      </p>
+    </div>
+  );
+}
+function LaneChangeResearch() {
+  const { data, source } = useResearch("lane-metrics");
+  if (!data) return <p className="micro">Lane-change study: {source}</p>;
+  return (
+    <section className="panel methodology lane-research">
+      <div className="eyebrow">LEARNED LANE-CHANGE ASSESSMENT</div>
+      <h2>What happened after recorded lane changes?</h2>
+      <p>
+        {num(data.recorded_transitions)} observed transitions;{" "}
+        {num(data.eligible_maneuvers)} usable maneuvers with complete front/rear
+        observations. Select and replay a real recorded example below.
+      </p>
+      <div className="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Algorithm</th>
+              <th>Validation F1</th>
+              <th>Validation ROC-AUC</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.comparison.map((row) => (
+              <tr key={row.name}>
+                <th>{row.name}</th>
+                <td>{pct(row.validation.f1)}</td>
+                <td>{pct(row.validation.roc_auc)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p>
+        <b>Selected: {data.selected_model}</b> · test F1 {pct(data.test.f1)} ·
+        test ROC-AUC {pct(data.test.roc_auc)} · always-conflict baseline F1{" "}
+        {pct(data.baseline_f1)}. Test sample: {data.split_sizes.test} maneuvers.
+        High F1 partly reflects class imbalance; it is not proof of safe lane
+        selection.
+      </p>
+      <p>
+        Assessment is one second before the recorded lane-ID crossing. The
+        outcome is an observed short front/rear headway or very small bumper gap
+        during the next second after crossing. These are uncalibrated
+        conflict-proxy scores, not accident predictions or counterfactual
+        guarantees.
+      </p>
+      <RecordedManeuver data={data} />
+      <p className="micro">{source}</p>
+    </section>
+  );
+}
 function Comparison() {
   const { data: m, source } = useResearch("metrics");
   return (
@@ -1415,6 +1766,7 @@ function Comparison() {
                 .join(" · ")}
             </p>
           </div>
+          <LaneChangeResearch />
         </>
       ) : (
         <p>{source}</p>
@@ -1464,10 +1816,14 @@ function About() {
           illustrative contact response, not a validated crash-dynamics model.
         </p>
         <p>
-          Manual mode applies user inputs. Automatic mode uses a proportional
-          cruise-speed rule and optional gap braking/lane-clearance checks.
-          These are programmed rules, not additional ML algorithms. No automatic
-          vehicle spawning is enabled. The camera follows traffic as it moves.
+          Manual mode applies user inputs. Automatic mode assesses both adjacent
+          lanes before stopping behind an obstacle. It checks front and rear
+          gaps, approaching vehicles and the projected lateral path. A
+          separately fitted lane-change conflict model can veto a supported
+          high-conflict estimate. Empty lanes use explicit geometry. Movement
+          rules are programmed; the conflict score is learned from observed
+          NGSIM lane changes. No automatic vehicle spawning is enabled. The
+          camera follows traffic as it moves.
         </p>
         <h2>What do the model scores mean?</h2>
         <p>
@@ -1556,15 +1912,15 @@ export default function App() {
       </header>
       <main>
         <PageBoundary key={location.pathname}>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/simulator" element={<Simulator />} />
-          <Route path="/prediction" element={<Simulator />} />
-          <Route path="/analysis" element={<Analysis />} />
-          <Route path="/performance" element={<Comparison />} />
-          <Route path="/about" element={<About />} />
-          <Route path="*" element={<Dashboard />} />
-        </Routes>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/simulator" element={<Simulator />} />
+            <Route path="/prediction" element={<Simulator />} />
+            <Route path="/analysis" element={<Analysis />} />
+            <Route path="/performance" element={<Comparison />} />
+            <Route path="/about" element={<About />} />
+            <Route path="*" element={<Dashboard />} />
+          </Routes>
         </PageBoundary>
       </main>
       <footer>
