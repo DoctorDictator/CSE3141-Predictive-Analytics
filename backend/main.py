@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Literal
 import json
 import os
+import hashlib
+import logging
 
 import joblib
 import pandas as pd
@@ -14,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ARTIFACTS=Path(os.getenv('ARTIFACT_DIR',Path(__file__).parent/'artifacts'))
 TASK='lane-change-behavior'
+VERSION='behavior-3'
 bundle={}
 load_error=None
 
@@ -24,16 +27,21 @@ async def lifespan(app):
     try:
         loaded={name:json.loads((ARTIFACTS/f'{name}.json').read_text(encoding='utf-8')) for name in ['info','metrics','analytics']}
         if any(value.get('task')!=TASK for value in loaded.values()): raise ValueError('Incompatible task artifacts')
-        if any(value.get('version')!='behavior-3' for value in loaded.values()): raise ValueError('Incompatible artifact version')
+        if any(value.get('version')!=VERSION for value in loaded.values()): raise ValueError('Incompatible artifact version')
+        model_metadata={key:value for key,value in loaded['info'].items() if key!='model_id'}
+        model_id=hashlib.sha256((ARTIFACTS/'behavior.joblib').read_bytes()+json.dumps(model_metadata,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+        if any(value.get('model_id')!=model_id for value in loaded.values()): raise ValueError('Fitted model and research artifacts do not match')
         loaded['model']=joblib.load(ARTIFACTS/'behavior.joblib')
         if list(loaded['model'].feature_names_in_)!=loaded['info']['features']: raise ValueError('Feature schema mismatch')
         bundle.update(loaded);load_error=None
     except Exception as exc:
+        logging.getLogger(__name__).exception('Could not load NearMiss model artifacts')
         load_error=f'Behavior model unavailable ({type(exc).__name__}). Execute notebooks/NearMiss.ipynb.'
     yield
+    bundle.clear()
 
 app=FastAPI(title='NearMiss Lane-Change Behavior API',version='3.0.0',lifespan=lifespan)
-app.add_middleware(CORSMiddleware,allow_origins=[v.strip() for v in os.getenv('CORS_ORIGINS','http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173').split(',') if v.strip()],allow_methods=['GET','POST'],allow_headers=['Content-Type'])
+app.add_middleware(CORSMiddleware,allow_origins=[v.strip() for v in os.getenv('CORS_ORIGINS','https://doctordictator.github.io,http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173').split(',') if v.strip()],allow_methods=['GET','POST'],allow_headers=['Content-Type'])
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request,exc):
@@ -98,10 +106,14 @@ def infer(rows):
     data=ready(); frame=pd.DataFrame(rows,columns=data['info']['features'])
     probabilities=data['model'].predict_proba(frame)[:,list(data['model'].classes_).index(1)]
     threshold=data['info']['decision_threshold']
-    return [dict(task=TASK,version=data['info']['version'],probability=float(p),prediction=int(p>=threshold),label='Lane change' if p>=threshold else 'Stay in lane',model=data['info']['name'],decision_threshold=threshold,horizon_seconds=2,scope='Estimated observed lane-crossing behavior; not accident probability or a lane recommendation') for p in probabilities]
+    return [dict(task=TASK,version=data['info']['version'],model_id=data['info']['model_id'],probability=float(p),prediction=int(p>=threshold),label='Lane change' if p>=threshold else 'Stay in lane',model=data['info']['name'],decision_threshold=threshold,horizon_seconds=2,scope='Estimated observed lane-crossing behavior; not accident probability or a lane recommendation') for p in probabilities]
 
 @app.get('/api/health')
-def health(): return dict(status='ready' if bundle else 'unavailable',model_loaded=bool(bundle),task=TASK,detail=load_error)
+def health():
+    return JSONResponse(status_code=200 if bundle else 503,content=dict(
+        status='ready' if bundle else 'unavailable',model_loaded=bool(bundle),task=TASK,
+        version=VERSION,model_id=bundle.get('info',{}).get('model_id'),
+        revision=os.getenv('RENDER_GIT_COMMIT'),detail=load_error))
 
 @app.get('/api/model/info')
 def info(): return ready()['info']
@@ -127,4 +139,4 @@ def predict_batch(batch:Batch):
         else: valid.append((item.id,row))
     if valid:
         results.extend(dict(id=pair_id,eligible=True,**prediction) for (pair_id,_),prediction in zip(valid,infer([row for _,row in valid])))
-    return dict(task=TASK,predictions=results)
+    return dict(task=TASK,version=VERSION,model_id=data['info']['model_id'],predictions=results)

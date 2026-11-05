@@ -27,12 +27,14 @@ export function Stat({ label, value, note }) {
   );
 }
 export function useResearch(name) {
+  const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState({
     data: null,
     source: "Loading recorded research…",
   });
   useEffect(() => {
     let active = true;
+    setState({ data: null, source: "Loading recorded research...", error: false });
     loadResearch(name)
       .then((value) => active && setState(value))
       .catch(
@@ -40,12 +42,13 @@ export function useResearch(name) {
           active &&
           setState({
             data: null,
+            error: true,
             source: "Research data could not load. Please try again.",
           }),
       );
     return () => {
       active = false;
     };
-  }, [name]);
-  return state;
+  }, [name, attempt]);
+  return { ...state, retry: () => setAttempt((value) => value + 1) };
 }

@@ -14,6 +14,8 @@ The target is observed lane-change behavior. It is not an accident label, a safe
 
 The website uses aggregate notebook exports for its charts and browser-side inference from the saved fitted model. Render runs the FastAPI service independently. A matching static export keeps the interface available while the API starts or is offline.
 
+The existing Render URL remains **https://trafficrush-api.onrender.com**. GitHub Pages supplies it through the repository variable `VITE_API_URL`. The site checks the API's task, schema and fitted-model fingerprint before accepting predictions. If Render is starting or updating, browser inference remains available and API checks retry after 30 seconds.
+
 ## Dataset and labels
 
 The project uses the public [Automatum Full Highway drone dataset](https://huggingface.co/datasets/AutomatumData/automatum-data-full-highway), which contains 114 German Autobahn recordings. It includes frame-rate vehicle positions and velocities, acceleration, lane and road IDs, dimensions, and current front/rear neighbors in the same and adjacent lanes. The source records no verified crashes.
@@ -70,6 +72,25 @@ Open http://127.0.0.1:5173/. The launcher starts FastAPI on port 8000 and Vite o
 - `POST /api/predict-batch`
 
 Prediction inputs must follow the feature names and training ranges in `backend/artifacts/info.json`. Requests with missing-neighbor flags must use the documented capped-gap encoding. The model returns an estimated lane-change score and the validation-selected decision.
+
+`/api/health` reports the model fingerprint and Render commit when available. It returns HTTP 503 if model artifacts are unavailable or do not match, so an incomplete deployment cannot report itself ready. Prediction batches carry the same fingerprint as the notebook and website exports.
+
+## Check the project
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r backend\requirements-test.txt
+.venv\Scripts\python.exe -m pytest backend -q
+cd frontend
+npm test
+$env:VITE_API_URL='https://trafficrush-api.onrender.com'
+$env:VITE_BASE_PATH='/CSE3141-Predictive-Analytics/'
+npm run build
+npm run test:production
+```
+
+The backend checks also exercise notebook preparation on tiny generated recordings and compare browser probabilities with the fitted Python classifier. The browser suite covers lane changes, waiting for blocked lanes, collisions, rewind/replay, mobile layout, API outages and retrying failed data loads. GitHub Actions runs backend and frontend checks before publishing the Pages build.
+
+For the existing Render service, the connected branch must be `main`, the root directory `backend`, the build command `pip install -r requirements.txt`, the start command `uvicorn main:app --host 0.0.0.0 --port $PORT`, and the health path `/api/health`. The deployed `/api/model/info` must report `lane-change-behavior`, `behavior-3` and the matching `model_id` from the website export.
 
 ## Repository outputs
 

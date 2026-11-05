@@ -9,6 +9,7 @@ const sample=()=>Object.fromEntries(info.features.map(key=>{
   const [low,high]=info.ranges[key];
   if(key==='has_leader'||key==='is_truck'||key.endsWith('_present'))return [key,0];
   if(key.endsWith('_gap'))return [key,low<=150&&high>=150?150:low];
+  if(key==='closing_speed'||key.endsWith('_closing_speed'))return [key,0];
   return [key,(low+high)/2];
 }));
 test('portable behavior model accepts the exported adjacent-lane feature schema',()=>{
@@ -37,5 +38,11 @@ for(const name of ['info','metrics','analytics']){
 }
 test('old conflict predictions cannot be mistaken for behavior forecasts',()=>{
   assert.throws(()=>validatePredictions({predictions:[{id:'1',eligible:true,probability:.8}]}));
-  assert.doesNotThrow(()=>validatePredictions({task:TASK,predictions:[{id:'1',eligible:true,task:TASK,prediction:1,probability:.8}]}));
+  const envelope={task:TASK,version:info.version,model_id:info.model_id};
+  const data={...envelope,predictions:[{...envelope,id:'1',eligible:true,prediction:1,probability:.8}]};
+  assert.doesNotThrow(()=>validatePredictions(data,info,['1']));
+  assert.throws(()=>validatePredictions({...data,version:'behavior-1'},info,['1']));
+  assert.throws(()=>validatePredictions({...data,model_id:'0'.repeat(64)},info,['1']));
+  assert.throws(()=>validatePredictions({...data,predictions:[data.predictions[0],data.predictions[0]]},info,['1']));
+  assert.throws(()=>validatePredictions(data,info,['2']));
 });

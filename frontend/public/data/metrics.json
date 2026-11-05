@@ -318,5 +318,6 @@
       "hw-a9-stammhamm-008-2d77e236-1728-4492-99f7-4582ecaa6bee"
     ]
   },
-  "protocol": "60/20/20 whole-recording group split; three-fold GroupKFold inside training recordings; threshold and model selected on validation; held-out recording test used once"
+  "protocol": "60/20/20 whole-recording group split; three-fold GroupKFold inside training recordings; threshold and model selected on validation; held-out recording test used once",
+  "model_id": "9c7022a7973d27d75abfbe9909d1b9bc609e229da2ba92d8c909909bdc7741ef"
 }

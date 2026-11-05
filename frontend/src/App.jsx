@@ -229,7 +229,7 @@ function Analysis() {
               ["front_gap", "Capped front bumper gap · m"],
               ["headway", "Front time headway · s (below 10)"],
               ["lane_id", "Recorded mainline lane occupancy"],
-              ["v_class", "Vehicle type · 1 motorcycle / 2 car / 3 truck"],
+              ["v_class", "Vehicle type · 0 other vehicles / 1 truck"],
             ].map(([key, title]) => (
               <div className="panel chart-card" key={key}>
                 <h2>{title}</h2>
@@ -463,7 +463,7 @@ function Comparison() {
               selection.
             </p>
             <p>
-              One recording, class imbalance and lateral movement already
+              Recording and location differences, class imbalance and movement already
               underway limit conclusions. The classifier predicts observed
               crossing behavior; it does not infer accident likelihood,
               recommend a lane, or establish safe driving.
@@ -502,7 +502,7 @@ function About() {
             target="_blank"
             rel="noreferrer"
           >
-            Automatum Full Highway dataset ?
+            Automatum Full Highway dataset
           </a>{" "}
           contains drone-tracked German Autobahn traffic, including positions,
           lane and road IDs, speeds, acceleration, vehicle dimensions and
@@ -530,7 +530,7 @@ function About() {
         <h2>Are generated cars sampled from the dataset?</h2>
         <p>
           The default generator samples aggregate speed, acceleration, truck
-          share and vehicle dimensions from the training data. Positions and lane
+          share and vehicle dimensions from all eligible dataset windows. Positions and lane
           assignments are newly generated, and the scene is not a historical
           replay. Fully synthetic ranges and deliberately constructed presets
           remain available.
@@ -579,7 +579,6 @@ function About() {
 }
 const nav = [
   ["/", "Dashboard", Layers],
-  ["/simulator", "Lane-change lab", Car],
   ["/analysis", "Distributions", BarChart3],
   ["/simulator", "Simulator", Car],
   ["/performance", "Model comparison", GitBranch],

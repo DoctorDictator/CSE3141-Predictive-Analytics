@@ -134,13 +134,42 @@ test("rewind restores pre-impact state and replay reaches same incident", () => 
   advance(w, 3);
   assert.equal(w.collisions.length, 1);
 });
-test('behavior observations use past lateral motion and capped bumper gaps',()=>{
+test('behavior observations use current velocity and capped bumper gaps',()=>{
   const w=createWorld();w.cars=[vehicle(1,0,20,15),vehicle(2,0,45,10)];advance(w,.6);
   const p=observations(w).find(p=>p.id==='1');assert.ok(p);assert.equal(p.inputs.speed,15);assert.equal(p.inputs.closing_speed,5);assert.equal(p.inputs.has_leader,1);assert.equal(p.inputs.lateral_speed,0);
   const leaderless=observations(w).find(p=>p.id==='2');assert.equal(leaderless.inputs.has_leader,0);assert.equal(leaderless.inputs.front_gap,150);
 });
-test('history is required and collided vehicles are not behavior candidates',()=>{
-  const w=createWorld();assert.equal(observations(w).length,0);advance(w,.6);w.cars[0].crashed=true;assert.ok(!observations(w).some(p=>p.id===String(w.cars[0].id)));
+test('current observations are available immediately and exclude collided vehicles',()=>{
+  const w=createWorld();assert.equal(observations(w).length,w.cars.length);w.cars[0].crashed=true;assert.ok(!observations(w).some(p=>p.id===String(w.cars[0].id)));
+});
+
+test('observations change identity when adjacent traffic or velocity changes',()=>{
+  const w=createWorld(3,2);w.cars=[vehicle(1,1,20,15),vehicle(2,0,45,10)];
+  const original=observations(w)[0].signature;
+  w.cars[1].speed=20;
+  assert.notEqual(observations(w)[0].signature,original);
+  const changed=observations(w)[0].signature;
+  w.cars[0].speed=16;
+  assert.notEqual(observations(w)[0].signature,changed);
+});
+
+test('lane changes expose instantaneous lateral velocity and reject multi-lane jumps',()=>{
+  const w=createWorld();w.cars=[vehicle(1,0,20,20)];
+  assert.equal(changeLane(w,w.cars[0],2),false);
+  changeLane(w,w.cars[0],1);advance(w,.8);
+  assert.ok(Math.abs(observations(w)[0].inputs.lateral_speed-3.46875)<.03);
+  advance(w,.9);assert.equal(observations(w)[0].inputs.lateral_speed,0);
+});
+
+test('dataset highway speeds are integrated without an instantaneous speed clamp',()=>{
+  const w=createWorld();w.cars=[vehicle(1,0,20,55,{accel:0})];tick(w);
+  assert.equal(w.cars[0].speed,55);
+});
+
+test('a merging vehicle remains visible as a leader while its body occupies the lane',()=>{
+  const w=createWorld();w.cars=[vehicle(1,0,20,20),vehicle(2,0,45,10)];
+  changeLane(w,w.cars[1],1);tick(w);
+  assert.equal(leader(w,w.cars[0])?.id,2);
 });
 test("automatic avoidance brakes; disabling avoidance permits a contact", () => {
   const w = createWorld();

@@ -21,11 +21,19 @@ Updated: 5 November 2026
 ## Integration checks
 
 - Python compilation: passed.
-- Backend API tests: 15 passed. Readiness, fitted-model equivalence, batch support, feature limits, missing-neighbor encoding, unavailable-model behavior, task/version schema and CORS were covered.
-- Frontend unit tests: 30 passed.
+- Backend/API/notebook tests: 23 passed. Readiness, fitted-model equivalence, browser/Python probability agreement, batch support, feature limits, missing-neighbor encoding, mismatched artifacts, task/version schema and CORS were covered. Tiny generated recordings validate rotated-road gaps, vehicle-frame lateral speed, actual lane crossings and exclusion of road changes, divider states, nonadjacent jumps and missing frames.
+- Frontend unit tests: 37 passed. New cases cover deployment mismatches, API retry delays and recovery, changing observation inputs, instantaneous lateral velocity, dataset highway speeds, and merging leaders remaining visible.
 - Production build: passed with GitHub Pages base path `/CSE3141-Predictive-Analytics/`.
-- Production browser suite: passed on five routes with repeated reloads, simulator initialization and movement, lane-change bypass, blocked-lane behavior, collision/replay cases, mobile layout, and no JavaScript errors or missing assets.
-- Live end-to-end smoke: FastAPI and Vite ran together; the browser suite passed all five routes and received 11 successful batch responses from the real API.
+- Production browser suite: passed on five routes with repeated reloads, simulator initialization and movement, lane-change bypass, blocked-lane behavior, collision/replay cases, mobile layout, and no JavaScript errors, duplicate navigation keys or missing assets. API outage/backoff and retrying a failed static dataset profile also passed.
+- Live end-to-end smoke: FastAPI and Vite ran together; the browser suite passed all five routes and received 10 successful batch responses from the real API.
 - Static schema checks: backend and browser aggregate exports match byte-for-byte; fitted model feature names match the 19-field API schema; `git diff --check` passed.
 
-The live host was not redeployed or rechecked from this local run. `README.md` contains the hosted website and simulator links.
+## Audit fixes
+
+- Model fingerprints are attached to notebook exports, static exports, API health and batch predictions. The backend verifies the fitted artifact and its metadata; the browser accepts matching models and complete response IDs only.
+- Delayed API scores are discarded when any current feature changes. Simulated observations use current lateral velocity immediately, matching the notebook's current-state input contract.
+- Removed duplicate Simulator navigation and corrected the Automatum truck indicator legend and outdated one-recording description.
+- Leaders remain visible while merging, dataset speeds do not undergo the old 45 m/s clamp, and preset changes preserve the loaded behavior model and traffic profile.
+- GitHub Actions now checks the API/notebook and frontend tests before deployment, on Ubuntu 24.04 to match the browser package's supported runner.
+
+The existing Render URL is retained as requested: `https://trafficrush-api.onrender.com`. During the audit it returned the old TrafficRush OpenAPI schema and 404 for `/api/model/info`; local backend integration passed. A push triggers the user's configured Render deployment. The frontend continues browser inference if that service is not yet compatible; remote API readiness must be checked after deployment before claiming it serves this model. `README.md` contains the hosted website and simulator links.

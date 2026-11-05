@@ -57,6 +57,7 @@ export function inferBehavior(info, inputs, { support = true } = {}) {
     label: prediction ? "Lane change" : "Stay in lane",
     model: info.name,
     version: info.version,
+    model_id: info.model_id,
     source: "Saved fitted model",
     horizon_seconds: 2,
   };

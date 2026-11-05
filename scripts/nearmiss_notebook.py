@@ -352,6 +352,8 @@ metrics=dict(task=TASK,version=VERSION,selected_model=winner['name'],comparison=
  split_recordings={'train':sorted(train_recordings),'validation':sorted(validation_recordings),'test':sorted(test_recordings)},
  protocol='60/20/20 whole-recording group split; three-fold GroupKFold inside training recordings; threshold and model selected on validation; held-out recording test used once')
 joblib.dump(selected,OUT/'behavior.joblib')
+model_id=hashlib.sha256((OUT/'behavior.joblib').read_bytes()+json.dumps(info,sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+info['model_id']=model_id;metrics['model_id']=model_id
 for name,value in [('info',info),('metrics',metrics)]:
     for folder in [OUT,PUBLIC]:(folder/f'{name}.json').write_text(json.dumps(value,indent=2,allow_nan=False),encoding='utf-8')
 print('Exported model and aggregate validation:',winner['name'])''')
@@ -474,7 +476,7 @@ simulator_profile=dict(speed_bins=histograms['v_vel'],acceleration_bins=histogra
  truck_length=float(truck_rows.length.median()) if len(truck_rows) else 12.0,
  car_width=float(car_rows.width.median()) if len(car_rows) else 1.8,
  truck_width=float(truck_rows.width.median()) if len(truck_rows) else 2.5)
-analytics=dict(task=TASK,version=VERSION,rows=raw_rows,vehicles=vehicle_total,recording_count=len(summary),duration_seconds=duration,
+analytics=dict(task=TASK,version=VERSION,model_id=model_id,rows=raw_rows,vehicles=vehicle_total,recording_count=len(summary),duration_seconds=duration,
  eligible_rows=all_windows,recorded_crossings=int(sum(s['lane_crossings'] for s in summary)),positive_rate=float(df.target.mean()),
  class_counts=class_counts,source='https://huggingface.co/datasets/AutomatumData/automatum-data-full-highway',
   sha256=manifest['sha256'],missing_values=int(df[FEATURES+['target']].isna().sum().sum()),

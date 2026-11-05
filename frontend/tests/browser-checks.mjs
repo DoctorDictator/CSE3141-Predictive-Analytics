@@ -1,7 +1,9 @@
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { inferBehavior } from "../src/services/behavior-inference.js";
 export async function browserChecks(base, { liveApi = false } = {}) {
+  const modelInfo = JSON.parse(fs.readFileSync(new URL("../public/data/info.json", import.meta.url)));
   const browser = await chromium.launch(
     process.platform === "win32"
       ? {
@@ -16,9 +18,11 @@ export async function browserChecks(base, { liveApi = false } = {}) {
         viewport: { width: 1500, height: 1100 },
       }),
       errors = [],
+      warnings = [],
       missing = [];
     let batches = 0;
     page.on("pageerror", (e) => errors.push(e.message));
+    page.on("console", (e) => { if (e.type() === "error" && /same key|unique.*key/i.test(e.text())) warnings.push(e.text()); });
     page.on("response", (r) => {
       if (r.url().includes("/assets/") && r.status() >= 400)
         missing.push(r.url());
@@ -26,14 +30,14 @@ export async function browserChecks(base, { liveApi = false } = {}) {
         batches++;
     });
     if (!liveApi)
-      await page.route("**/api/**", (route) =>
-        route.fulfill({
-          json: {
-            task: "lane-change-behavior",
-            predictions: [{ id: "1", eligible: true, task: "lane-change-behavior", probability: 0.99, prediction: 1, label: "Lane change" }],
-          },
-        }),
-      );
+      await page.route("**/api/**", (route) => {
+        if (route.request().url().endsWith("/api/model/info")) return route.fulfill({ json: modelInfo });
+        const rows = route.request().postDataJSON()?.observations || [];
+        return route.fulfill({ json: {
+          task: modelInfo.task, version: modelInfo.version, model_id: modelInfo.model_id,
+          predictions: rows.map(({id,inputs}) => ({id,...inferBehavior(modelInfo,inputs)})),
+        }});
+      });
     fs.mkdirSync("test-results", { recursive: true });
     for (const [route, title] of [
       ["", "Predict the next lane change."],
@@ -55,6 +59,8 @@ export async function browserChecks(base, { liveApi = false } = {}) {
       );
     }
     await page.goto(`${base}#/simulator`);
+    await page.locator(".page-heading .status").filter({ hasText: /Model connected|Saved fitted behavior model/ }).waitFor();
+    if (liveApi) await page.getByText("Model connected - behavior inference", { exact: true }).waitFor();
     await page.getByLabel("Number of Lanes", { exact: true }).selectOption("4");
     await page.getByLabel("Number of vehicles", { exact: true }).fill("12");
     await page
@@ -201,11 +207,37 @@ export async function browserChecks(base, { liveApi = false } = {}) {
       fullPage: true,
     });
     assert.deepEqual(errors, []);
+    assert.deepEqual(warnings, []);
     assert.deepEqual(missing, []);
     if (liveApi)
       assert.ok(batches > 0, "Actual behavior API must receive requests");
+    const liveBatches = batches;
+    // Rolling API deploys must preserve browser inference and simulation controls.
+    let unavailableRequests = 0;
+    await page.route("**/api/**", (route) => {
+      unavailableRequests++;
+      return route.fulfill({ status: 503, json: { detail: "Model is deploying" } });
+    });
+    await page.goto(`${base}#/simulator`);
+    await page.getByText("Saved fitted behavior model - local inference", { exact: true }).waitFor();
+    assert.match(await page.locator(".risk-box strong").textContent(), /\d/);
+    const requestsAfterFailure = unavailableRequests;
+    await page.waitForTimeout(1200);
+    assert.equal(unavailableRequests, requestsAfterFailure, "API outage uses a retry delay");
+
+    // Failed static data must give a recoverable UI instead of a blank page.
+    const profileUrl = "**/data/analytics.json*";
+    await page.route(profileUrl, (route) => route.fulfill({ json: { task: "old-task" } }));
+    await page.reload();
+    await page.getByRole("button", { name: "Retry dataset profile", exact: true }).waitFor();
+    await page.unroute(profileUrl);
+    await page.getByRole("button", { name: "Retry dataset profile", exact: true }).click();
+    await page.getByRole("button", { name: "Generate Random Traffic", exact: true }).click();
+    await page.getByText("New scene sampled from Automatum distributions", { exact: true }).waitFor();
+    assert.deepEqual(errors, []);
+    assert.deepEqual(warnings, []);
     console.log(
-      `PASS: 5 routes, repeated loads, aggregate dataset initialization, 4 lanes/12 cars, independent bypass, blocked lanes, 3 contacts/replays, 30 cars, mobile and task-schema protection. Behavior API batch responses: ${batches}.`,
+      `PASS: 5 routes, repeated loads, aggregate dataset initialization, 4 lanes/12 cars, independent bypass, blocked lanes, 3 contacts/replays, 30 cars, mobile, API outage/backoff and static-data recovery. Behavior API batch responses: ${liveBatches}.`,
     );
   } finally {
     await browser.close();

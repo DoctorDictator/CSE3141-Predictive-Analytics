@@ -1,6 +1,7 @@
 services:
   - type: web
-    name: nearmiss-api
+    # Keep the existing public API URL used by GitHub Pages.
+    name: trafficrush-api
     runtime: python
     plan: free
     rootDir: backend

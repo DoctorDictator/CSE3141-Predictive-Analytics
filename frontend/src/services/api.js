@@ -1,8 +1,9 @@
 import { validateResearch } from "./research-schema.js";
 export const API_URL = (
-  import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")
 ).replace(/\/$/, "");
 export async function request(path, options = {}) {
+  if (!API_URL) throw new Error("A prediction API is not configured.");
   const r = await fetch(`${API_URL}${path}`, {
     ...options,
     signal: options.signal || AbortSignal.timeout(10000),
@@ -13,6 +14,7 @@ export async function request(path, options = {}) {
 async function saved(name) {
   const r = await fetch(
     `${import.meta.env.BASE_URL}data/${name}.json?v=behavior-3`,
+    { cache: "no-cache", signal: AbortSignal.timeout(8000) },
   );
   if (!r.ok) throw new Error("Recorded research export is unavailable.");
   return {

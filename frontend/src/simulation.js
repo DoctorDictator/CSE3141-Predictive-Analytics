@@ -1,6 +1,7 @@
 // Metres, seconds, front-bumper longitudinal coordinates. Geometry is independent of ML.
 export const LANE_WIDTH = 3.7;
 export const STEP = 1 / 120;
+export const MAX_SPEED = 80;
 export const SCENARIOS = [
   "Normal Highway Traffic",
   "Sudden Braking",
@@ -30,6 +31,7 @@ export function vehicle(id, lane, x, speed = 15, extra = {}) {
     x,
     speed,
     accel: 0,
+    lateralSpeed: 0,
     desired: speed,
     length: 4.6,
     width: 1.8,
@@ -87,6 +89,7 @@ export function saveInitial(w) {
     mode: w.mode,
     avoidance: w.avoidance,
     autoLane: w.autoLane,
+    initializationSource: w.initializationSource,
   });
 }
 export function reset(w) {
@@ -106,12 +109,14 @@ export function event(w, text, type = "control") {
   w.events = w.events.slice(0, 100);
 }
 export function leader(w, car) {
-  if (car.changing || car.crashed) return null;
+  if (car.crashed) return null;
   return (
     w.cars
       .filter(
         (c) =>
-          c.id !== car.id && !c.changing && c.lane === car.lane && c.x > car.x,
+          c.id !== car.id &&
+          Math.abs(c.y - car.y) < (c.width + car.width) / 2 + 0.2 &&
+          c.x - c.length / 2 > car.x - car.length / 2,
       )
       .sort((a, b) => a.x - b.x)[0] || null
   );
@@ -129,7 +134,7 @@ export function changeLane(w, car, lane) {
     car.changing ||
     lane < 0 ||
     lane >= w.lanes ||
-    lane === car.lane
+    Math.abs(lane - car.lane) !== 1
   )
     return false;
   car.changing = true;
@@ -263,6 +268,7 @@ export function setLanes(w, lanes) {
     c.lane = Math.min(c.lane, lanes - 1);
     c.y = (c.lane + 0.5) * LANE_WIDTH;
     c.changing = false;
+    c.lateralSpeed = 0;
     while (
       occupied[c.lane].some(
         (o) => Math.abs(o.x - c.x) < Math.max(o.length, c.length) + 5,
@@ -297,6 +303,7 @@ export function addCar(w) {
 }
 export function loadScenario(w, name) {
   const trafficProfile = w.trafficProfile;
+  const behaviorModel = w.behaviorModel;
   Object.assign(
     w,
     createWorld(
@@ -306,6 +313,8 @@ export function loadScenario(w, name) {
     ),
   );
   w.trafficProfile = trafficProfile;
+  w.behaviorModel = behaviorModel;
+  w.initializationSource = `Programmed preset: ${name}`;
   if (name === "Normal Highway Traffic")
     w.cars.forEach((c) => {
       c.speed = 14 + c.lane * 2;
@@ -383,6 +392,7 @@ export function tick(w, dt = STEP) {
   dt = Math.min(dt, 0.02);
   w.time += dt;
   for (const c of w.cars) {
+    c.lateralSpeed = 0;
     if (c.crashed) continue;
     if (c.brakeAt != null && w.time >= c.brakeAt) {
       brake(w, c);
@@ -469,7 +479,7 @@ export function tick(w, dt = STEP) {
       }
     }
     c.actualAccel = a;
-    const next = Math.max(0, Math.min(45, c.speed + a * dt));
+    const next = Math.max(0, Math.min(MAX_SPEED, c.speed + a * dt));
     c.x += (c.speed + next) * 0.5 * dt;
     c.speed = next;
     if (c.changing) {
@@ -477,6 +487,7 @@ export function tick(w, dt = STEP) {
       const t = Math.min(1, c.changeTime / 1.6),
         ease = t * t * (3 - 2 * t);
       c.y = c.fromY + (c.toY - c.fromY) * ease;
+      c.lateralSpeed = ((c.toY - c.fromY) / 1.6) * 6 * t * (1 - t);
       if (t === 1) {
         c.lane = c.targetLane;
         c.changing = false;
@@ -505,6 +516,7 @@ export function tick(w, dt = STEP) {
         c.speed = 0;
         c.accel = 0;
         c.actualAccel = 0;
+        c.lateralSpeed = 0;
         c.changing = false;
       }
       event(
@@ -555,28 +567,25 @@ export function rewind(w) {
   w.epoch++;
 }
 export function behaviorObservation(w, c) {
-  if (c.crashed || w.time < 0.5) return null;
-  const old = w.history.find(
-    (h) => h.time >= w.time - 0.6 && h.time <= w.time - 0.45,
-  );
-  const before = old?.cars.find((v) => v.id === c.id);
-  if (!before) return null;
+  if (c.crashed) return null;
+  const currentLane = Math.max(0, Math.min(w.lanes - 1, Math.floor(c.y / LANE_WIDTH)));
   const l = leader(w, c);
-  const dt = w.time - old.time;
   const neighbor = (lane, position) => {
     if (lane < 0 || lane >= w.lanes) return null;
     const candidates = w.cars.filter(
       (v) =>
         v.id !== c.id &&
-        v.lane === lane &&
-        (position === "front" ? v.x > c.x : v.x < c.x),
+        Math.floor(v.y / LANE_WIDTH) === lane &&
+        (position === "front"
+          ? v.x - v.length / 2 > c.x - c.length / 2
+          : v.x - v.length / 2 <= c.x - c.length / 2),
     );
     return position === "front"
       ? candidates.sort((a, b) => a.x - b.x)[0] || null
       : candidates.sort((a, b) => b.x - a.x)[0] || null;
   };
   const adjacent = (side, position) => {
-    const other = neighbor(c.lane + (side === "left" ? -1 : 1), position);
+    const other = neighbor(currentLane + (side === "left" ? -1 : 1), position);
     const isFront = position === "front";
     const gap = other
       ? Math.max(
@@ -602,7 +611,7 @@ export function behaviorObservation(w, c) {
   const inputs = {
     speed: c.speed,
     acceleration: c.actualAccel ?? c.accel,
-    lateral_speed: Math.abs(c.y - before.y) / dt,
+    lateral_speed: Math.abs(c.lateralSpeed ?? 0),
     front_gap: l ? Math.max(0, Math.min(150, l.x - l.length - c.x)) : 150,
     closing_speed: l ? c.speed - l.speed : 0,
     has_leader: l ? 1 : 0,
@@ -614,7 +623,7 @@ export function behaviorObservation(w, c) {
   };
   return {
     id: String(c.id),
-    signature: `${c.id}:${c.lane}:${l?.id ?? 0}`,
+    signature: JSON.stringify([c.id, currentLane, inputs]),
     inputs,
   };
 }

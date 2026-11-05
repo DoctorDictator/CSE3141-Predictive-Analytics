@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import joblib
@@ -36,6 +38,8 @@ def test_readiness_artifacts_and_task(client):
     health = client.get("/api/health").json()
     assert health["model_loaded"] is True
     assert health["task"] == "lane-change-behavior"
+    assert health["version"] == main.VERSION
+    assert len(health["model_id"]) == 64
     for path in ["/api/model/info", "/api/model/metrics", "/api/analytics"]:
         response = client.get(path)
         assert response.status_code == 200
@@ -53,6 +57,7 @@ def test_prediction_matches_fitted_model(client, example):
     assert response.json()["probability"] == pytest.approx(expected)
     assert response.json()["prediction"] == int(expected >= info["decision_threshold"])
     assert response.json()["label"] in ["Stay in lane", "Lane change"]
+    assert response.json()["model_id"] == info["model_id"]
 
 
 def test_batch_ids_and_training_support(client, example):
@@ -88,6 +93,7 @@ def test_unavailable_model_has_no_substitute_predictions(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "ARTIFACTS", tmp_path)
     with TestClient(main.app) as client:
         assert client.get("/api/health").json()["model_loaded"] is False
+        assert client.get("/api/health").status_code == 503
         assert client.get("/api/model/info").status_code == 503
 
 
@@ -108,3 +114,40 @@ def test_cors(client):
         "Access-Control-Request-Method": "POST",
     })
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_inconsistent_artifact_bundle_is_unavailable(monkeypatch, tmp_path):
+    for name in ["info.json", "metrics.json", "analytics.json", "behavior.joblib"]:
+        shutil.copy(main.ARTIFACTS / name, tmp_path / name)
+    info = json.loads((tmp_path / "info.json").read_text())
+    info["decision_threshold"] = 0.99
+    (tmp_path / "info.json").write_text(json.dumps(info))
+    monkeypatch.setattr(main, "ARTIFACTS", tmp_path)
+    with TestClient(main.app) as client:
+        assert client.get("/api/health").status_code == 503
+        assert client.get("/api/model/info").status_code == 503
+
+
+def test_browser_predictions_match_python_model(example):
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is required for browser/Python parity")
+    project = Path(__file__).resolve().parent.parent
+    info = json.loads((main.ARTIFACTS / "info.json").read_text())
+    rows = [{**example, "speed": speed, "lateral_speed": lateral}
+            for speed in [12, 25, 40] for lateral in [0, .001, .05, 1]]
+    script = """
+import fs from 'node:fs';
+import {inferBehavior} from './frontend/src/services/behavior-inference.js';
+const {info,rows}=JSON.parse(fs.readFileSync(0,'utf8'));
+console.log(JSON.stringify(rows.map(row=>inferBehavior(info,row).probability)));
+"""
+    result = subprocess.run([node, "--input-type=module", "-e", script],
+        input=json.dumps(dict(info=info, rows=rows)), text=True,
+        capture_output=True, cwd=project, check=True)
+    browser = json.loads(result.stdout)
+    fitted = joblib.load(main.ARTIFACTS / "behavior.joblib")
+    expected = fitted.predict_proba(pd.DataFrame(rows, columns=info["features"]))[:, 1]
+    # sklearn fits some QDA arrays in float32; the browser evaluates in float64.
+    assert browser == pytest.approx(expected.tolist(), abs=1e-7)
+    assert [int(p >= info['decision_threshold']) for p in browser] == [int(p >= info['decision_threshold']) for p in expected]

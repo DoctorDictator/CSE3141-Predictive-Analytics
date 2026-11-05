@@ -27,6 +27,7 @@ import {
   tick,
   STEP,
   LANE_WIDTH,
+  MAX_SPEED,
   SCENARIOS,
   leader,
   brake,
@@ -41,7 +42,7 @@ import {
   behaviorObservation,
 } from "./simulation.js";
 import { request } from "./services/api.js";
-import { validatePredictions } from "./services/research-schema.js";
+import { createBehaviorClient } from "./services/behavior-client.js";
 import { inferBehavior } from "./services/behavior-inference.js";
 import { Button, Field, Stat, useResearch } from "./components.jsx";
 const pct = (x) => `${(x * 100).toFixed(1)}%`;
@@ -56,7 +57,7 @@ export default function Simulator() {
     runRef = useRef(false),
     [version, render] = useState(0);
   const { data: behaviorInfo } = useResearch("info");
-  const { data: analytics } = useResearch("analytics");
+  const { data: analytics, source: analyticsStatus, error: analyticsError, retry: retryAnalytics } = useResearch("analytics");
   const [initialization, setInitialization] = useState("profile");
   useEffect(() => {
     w.behaviorModel = behaviorInfo;
@@ -76,13 +77,10 @@ export default function Simulator() {
   const [scores, setScores] = useState({}),
     [apiStatus, setApiStatus] = useState("Connecting to model…");
   const generation = useRef(0),
-    scoreRef = useRef({}),
-    lastElevated = useRef(new Set());
+    clientRef = useRef(null);
   const update = () => render((v) => v + 1);
   const clearScores = () => {
     generation.current++;
-    scoreRef.current = {};
-    lastElevated.current = new Set();
     setScores({});
   };
   const mutate = (fn) => {
@@ -91,6 +89,10 @@ export default function Simulator() {
     clearScores();
     update();
   };
+  useEffect(() => {
+    clientRef.current = behaviorInfo ? createBehaviorClient(behaviorInfo, { request }) : null;
+    return () => { clientRef.current = null; };
+  }, [behaviorInfo]);
   useEffect(() => {
     runRef.current = running;
   }, [running]);
@@ -131,20 +133,11 @@ export default function Simulator() {
         stamp = generation.current,
         epoch = current.epoch,
         at = current.time;
-      if (rows.length) {
+      if (rows.length && clientRef.current) {
         controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
         try {
-          const response = validatePredictions(
-            await request("/api/predict-batch", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              signal: controller.signal,
-              body: JSON.stringify({
-                observations: rows.map(({ id, inputs }) => ({ id, inputs })),
-              }),
-            }),
-          );
+          const response = await clientRef.current.predict(rows, controller.signal);
           if (
             !disposed &&
             stamp === generation.current &&
@@ -161,11 +154,11 @@ export default function Simulator() {
                   signature: latest.signature,
                   at,
                   wall: Date.now(),
-                  source: "Live API",
+                  source: response.source,
                 };
             }
             setScores(mapped);
-            setApiStatus("Model connected - behavior inference");
+            setApiStatus(response.source);
           }
         } catch {
           if (!disposed) {
@@ -182,7 +175,7 @@ export default function Simulator() {
       } else if (!disposed)
         setApiStatus(
           current.behaviorModel
-            ? "Model ready - collecting 0.5 s motion history"
+            ? "Saved behavior model ready"
             : "Loading behavior model",
         );
       if (!disposed) timer = setTimeout(poll, 1000);
@@ -201,7 +194,7 @@ export default function Simulator() {
         eligible: false,
         reason: c.crashed
           ? "No behavior estimate for a collided vehicle"
-          : "Collecting 0.5 s motion history",
+          : "Vehicle state unavailable",
       };
     const cached = scores[c.id];
     if (
@@ -378,6 +371,12 @@ export default function Simulator() {
           >
             Generate Random Traffic
           </Button>
+          {initialization === "profile" && analyticsError && (
+            <div role="alert">
+              <p className="micro">{analyticsStatus}</p>
+              <Button onClick={retryAnalytics}>Retry dataset profile</Button>
+            </div>
+          )}
           <div className="divider" />
           <div className="eyebrow">SCENARIO LIBRARY</div>
           <Field label="Reproducible scenario">
@@ -907,7 +906,7 @@ export default function Simulator() {
                 <Car size={65} />
                 <strong>V{String(car.id).padStart(2, "0")}</strong>
                 <span>
-                  {car.type} · {car.length} m
+                  {car.type} · {car.length.toFixed(1)} m
                 </span>
               </div>
               <div className="pair-info">
@@ -1013,13 +1012,13 @@ export default function Simulator() {
                   disabled={car.crashed}
                   type="number"
                   min="0"
-                  max="162"
+                  max={MAX_SPEED * 3.6}
                   value={Math.round(car.desired * 3.6)}
                   onChange={(e) =>
                     mutate(() => {
                       car.desired = Math.max(
                         0,
-                        Math.min(45, +e.target.value / 3.6),
+                        Math.min(MAX_SPEED, +e.target.value / 3.6),
                       );
                       car.targetActive = true;
                       event(
@@ -1038,7 +1037,7 @@ export default function Simulator() {
                   min="-8"
                   max="4"
                   step=".25"
-                  value={car.accel}
+                  value={Number(car.accel.toFixed(3))}
                   onChange={(e) =>
                     mutate(() => {
                       car.accel = Math.max(-8, Math.min(4, +e.target.value));
@@ -1106,6 +1105,7 @@ export default function Simulator() {
                     car.speed = c.speed;
                     car.desired = c.desired;
                     car.accel = c.accel;
+                    car.actualAccel = c.accel;
                     car.color = c.color;
                     event(w, `Vehicle ${car.id} behavior regenerated`);
                   })
