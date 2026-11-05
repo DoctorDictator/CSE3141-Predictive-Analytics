@@ -16,7 +16,8 @@ def ready(url):
         with urlopen(url, timeout=1) as response:
             body = response.read().decode("utf-8")
         if url == API:
-            return json.loads(body).get("model_loaded") is True
+            health=json.loads(body)
+            return health.get("model_loaded") is True and health.get("task")=="lane-change-behavior"
         return "NearMiss" in body
     except (OSError, ValueError):
         return False
@@ -27,7 +28,7 @@ def main():
     vite = ROOT / "frontend/node_modules/vite/bin/vite.js"
     if not node or not vite.exists():
         raise SystemExit("Install Node, then run npm ci inside frontend/.")
-    if not (ROOT / "backend/artifacts/nearmiss.joblib").exists():
+    if not (ROOT / "backend/artifacts/behavior.joblib").exists():
         raise SystemExit("First run: python scripts/nearmiss_notebook.py --execute")
 
     services = [

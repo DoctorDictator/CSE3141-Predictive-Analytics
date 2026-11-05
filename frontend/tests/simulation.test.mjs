@@ -134,29 +134,13 @@ test("rewind restores pre-impact state and replay reaches same incident", () => 
   advance(w, 3);
   assert.equal(w.collisions.length, 1);
 });
-test("leader pairing uses nearest same-lane front; features use front spacing", () => {
-  const w = createWorld();
-  w.cars = [
-    vehicle(1, 0, 20, 15),
-    vehicle(2, 0, 45, 10),
-    vehicle(3, 0, 80, 10),
-    vehicle(4, 1, 30, 10),
-  ];
-  assert.equal(leader(w, w.cars[0]).id, 2);
-  const p = observations(w).find((p) => p.id === "1");
-  assert.equal(p.inputs.spacing_m, 25);
-  assert.equal(p.inputs.leader_length, 4.6);
-  assert.equal(p.inputs.follower_speed, 15);
-  changeLane(w, w.cars[0], 1);
-  assert.ok(!observations(w).some((p) => p.id === "1"));
+test('behavior observations use past lateral motion and capped bumper gaps',()=>{
+  const w=createWorld();w.cars=[vehicle(1,0,20,15),vehicle(2,0,45,10)];advance(w,.6);
+  const p=observations(w).find(p=>p.id==='1');assert.ok(p);assert.equal(p.inputs.speed,15);assert.equal(p.inputs.closing_speed,5);assert.equal(p.inputs.has_leader,1);assert.equal(p.inputs.lateral_speed,0);
+  const leaderless=observations(w).find(p=>p.id==='2');assert.equal(leaderless.inputs.has_leader,0);assert.equal(leaderless.inputs.front_gap,150);
 });
-test("stopped, collided, leaderless and changing vehicles are not eligible", () => {
-  const w = createWorld();
-  w.cars = [vehicle(1, 0, 0, 0), vehicle(2, 0, 30, 15)];
-  assert.equal(observations(w).length, 0);
-  w.cars[0].speed = 15;
-  w.cars[1].crashed = true;
-  assert.equal(observations(w).length, 0);
+test('history is required and collided vehicles are not behavior candidates',()=>{
+  const w=createWorld();assert.equal(observations(w).length,0);advance(w,.6);w.cars[0].crashed=true;assert.ok(!observations(w).some(p=>p.id===String(w.cars[0].id)));
 });
 test("automatic avoidance brakes; disabling avoidance permits a contact", () => {
   const w = createWorld();

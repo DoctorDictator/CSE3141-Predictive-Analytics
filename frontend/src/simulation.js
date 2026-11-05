@@ -1,5 +1,4 @@
 // Metres, seconds, front-bumper longitudinal coordinates. Geometry is independent of ML.
-import { inferLaneModel } from "./services/lane-inference.js";
 export const LANE_WIDTH = 3.7;
 export const STEP = 1 / 120;
 export const SCENARIOS = [
@@ -68,7 +67,6 @@ export function createWorld(lanes = 3, count = 6, seed = 42) {
     collisions: [],
     laneChanges: 0,
     completedLaneChanges: 0,
-    laneScores: {},
     nextId: count + 1,
     mode: "Manual Traffic",
     avoidance: true,
@@ -98,7 +96,6 @@ export function reset(w) {
     collisions: [],
     laneChanges: 0,
     completedLaneChanges: 0,
-    laneScores: {},
     history: [],
     historyClock: 0,
     epoch: w.epoch + 1,
@@ -156,8 +153,6 @@ export function laneAssessment(w, car, lane) {
     reason: "",
     front: null,
     rear: null,
-    probability: null,
-    modelSource: "Clearance rules",
   };
   if (lane < 0 || lane >= w.lanes || Math.abs(lane - car.lane) !== 1)
     return { ...result, reason: "No adjacent lane" };
@@ -185,34 +180,6 @@ export function laneAssessment(w, car, lane) {
   const rearGap = result.rear ? car.x - car.length - result.rear.x : null;
   result.frontGap = frontGap;
   result.rearGap = rearGap;
-  result.key = `${car.id}:${lane}`;
-  result.signature = `${result.front?.id ?? "-"}:${result.rear?.id ?? "-"}`;
-  if (result.front && result.rear && frontGap > 0 && rearGap > 0)
-    result.inputs = {
-      ego_speed: car.speed,
-      front_speed: result.front.speed,
-      rear_speed: result.rear.speed,
-      front_gap: frontGap,
-      rear_gap: rearGap,
-    };
-  const score = w.laneScores?.[result.key];
-  if (
-    result.inputs &&
-    score?.eligible &&
-    score.signature === result.signature &&
-    w.time >= score.at &&
-    w.time - score.at < 2.5 &&
-    Date.now() - score.wall < 5000
-  ) {
-    result.probability = score.probability;
-    result.modelSource = `${score.model} fitted on recorded lane changes`;
-  } else if (result.inputs && w.laneModel) {
-    const local = inferLaneModel(w.laneModel, result.inputs);
-    if (local.eligible) {
-      result.probability = local.probability;
-      result.modelSource = `Saved fitted ${w.laneModel.name} (local inference)`;
-    } else result.modelReason = local.reason;
-  }
   if (
     result.front &&
     frontGap <
@@ -261,21 +228,12 @@ export function laneAssessment(w, car, lane) {
         };
     }
   }
-  if (result.probability != null && result.probability >= 0.5)
-    return {
-      ...result,
-      reason: "Model estimates elevated close-conflict likelihood",
-    };
   return {
     ...result,
     clear: true,
     reason: result.empty
       ? "Empty adjacent lane; projected path clear"
-      : result.probability != null
-        ? "Lower model conflict score and geometric clearance"
-        : result.inputs
-          ? "Geometric clearance; learned score unavailable"
-          : "Geometric clearance; model needs both target-lane neighbors",
+      : "Front/rear clearance and projected path clear",
   };
 }
 
@@ -294,16 +252,6 @@ export function requestLaneChange(w, car, lane) {
   return changeLane(w, car, lane);
 }
 
-export function laneObservations(w) {
-  return w.cars
-    .filter((c) => !c.crashed && !c.changing)
-    .flatMap((c) =>
-      [c.lane - 1, c.lane + 1].map((l) => laneAssessment(w, c, l)),
-    )
-    .filter((a) => a.inputs)
-    .map((a) => ({ id: a.key, signature: a.signature, inputs: a.inputs }))
-    .slice(0, 60);
-}
 export function setLanes(w, lanes) {
   w.lanes = lanes;
   // Old snapshots refer to different road geometry and must not be replayed.
@@ -348,7 +296,7 @@ export function addCar(w) {
   return null;
 }
 export function loadScenario(w, name) {
-  const laneModel = w.laneModel;
+  const trafficSeeds = w.trafficSeeds;
   Object.assign(
     w,
     createWorld(
@@ -357,7 +305,7 @@ export function loadScenario(w, name) {
       42,
     ),
   );
-  w.laneModel = laneModel;
+  w.trafficSeeds = trafficSeeds;
   if (name === "Normal Highway Traffic")
     w.cars.forEach((c) => {
       c.speed = 14 + c.lane * 2;
@@ -494,11 +442,7 @@ export function tick(w, dt = STEP) {
                   o.front.speed > ahead.speed + 1 ||
                   o.frontGap > gap + 10),
             )
-            .sort(
-              (x, y) =>
-                Number(y.empty) - Number(x.empty) ||
-                (x.probability ?? 0) - (y.probability ?? 0),
-            );
+            .sort((x, y) => Number(y.empty) - Number(x.empty));
           const chosen = available[0];
           const reason =
             chosen?.reason ||
@@ -508,7 +452,6 @@ export function tick(w, dt = STEP) {
             lane: chosen?.lane ?? null,
             clear: !!chosen,
             reason,
-            probability: chosen?.probability ?? null,
             time: w.time,
           };
           if (chosen) {
@@ -609,28 +552,65 @@ export function rewind(w) {
   }
   Object.assign(w, clone(state));
   w.history = [];
-  w.laneScores = {};
   w.epoch++;
 }
+export function behaviorObservation(w, c) {
+  if (c.crashed || w.time < 0.5) return null;
+  const old = w.history.find(
+    (h) => h.time >= w.time - 0.6 && h.time <= w.time - 0.45,
+  );
+  const before = old?.cars.find((v) => v.id === c.id);
+  if (!before) return null;
+  const l = leader(w, c);
+  const dt = w.time - old.time;
+  const inputs = {
+    speed: c.speed,
+    acceleration: c.actualAccel ?? c.accel,
+    lateral_speed: Math.abs(c.y - before.y) / dt,
+    front_gap: l ? Math.max(0, Math.min(150, l.x - l.length - c.x)) : 150,
+    closing_speed: l ? c.speed - l.speed : 0,
+    has_leader: l ? 1 : 0,
+  };
+  return {
+    id: String(c.id),
+    signature: `${c.id}:${c.lane}:${l?.id ?? 0}`,
+    inputs,
+  };
+}
 export function observations(w) {
-  return w.cars.flatMap((c) => {
-    const l = leader(w, c);
-    if (!l || l.crashed || c.speed < 0.5) return [];
-    const spacing = l.x - c.x;
-    if (spacing <= l.length) return [];
-    return [
+  return w.cars.map((c) => behaviorObservation(w, c)).filter(Boolean);
+}
+
+export function generateFromSnapshot(lanes, count, seed, snapshots) {
+  if (!snapshots?.length)
+    throw new Error("Recorded traffic snapshots are not loaded.");
+  const rng = random(seed),
+    snapshot = snapshots[Math.floor(rng() * snapshots.length)];
+  const cars = snapshot.slice(0, count).map((v, i) =>
+    vehicle(
+      i + 1,
+      Math.min(lanes - 1, Math.floor((v.lane * lanes) / 5)),
+      v.x,
+      v.speed,
       {
-        id: String(c.id),
-        leaderId: l.id,
-        inputs: {
-          follower_speed: c.speed,
-          leader_speed: l.speed,
-          follower_accel: c.actualAccel ?? c.accel,
-          leader_accel: l.actualAccel ?? l.accel,
-          spacing_m: spacing,
-          leader_length: l.length,
-        },
+        accel: v.accel,
+        length: v.length,
+        width: v.width,
+        type: v.type,
+        sourceId: v.source_id,
       },
-    ];
-  });
+    ),
+  );
+  // Adaptation to a different lane count can compress lanes. Separate resulting overlaps.
+  const occupied = Array.from({ length: lanes }, () => []);
+  for (const c of cars) {
+    while (
+      occupied[c.lane].some(
+        (o) => Math.abs(o.x - c.x) < Math.max(o.length, c.length) + 2,
+      )
+    )
+      c.x += Math.max(8, c.length + 3);
+    occupied[c.lane].push(c);
+  }
+  return cars;
 }
