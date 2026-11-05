@@ -1,17 +1,12 @@
 import { Component, useEffect, useState } from "react";
-import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import {
-  Activity,
   ArrowRight,
   BarChart3,
   Car,
-  Database,
   GitBranch,
   Info,
   Layers,
-  Pause,
-  Play,
-  RotateCcw,
   TrafficCone,
 } from "lucide-react";
 import {
@@ -24,7 +19,6 @@ import {
   Tooltip,
 } from "recharts";
 import Simulator from "./Simulator.jsx";
-import "./replay.css";
 import {
   Button,
   Field,
@@ -96,7 +90,7 @@ function Dashboard() {
   return (
     <>
       <Heading
-        eyebrow="NGSIM / OBSERVED DRIVER BEHAVIOR"
+        eyebrow="AUTOMATUM / OBSERVED DRIVER BEHAVIOR"
         title="Predict the next lane change."
         source={source}
       >
@@ -118,7 +112,7 @@ function Dashboard() {
             <Stat
               label="Eligible future windows"
               value={number(a.eligible_rows)}
-              note="Complete next 2 seconds at 10 Hz"
+              note="1-second assessment points; complete 2-second future"
             />
             <Stat
               label="Selected classifier"
@@ -133,11 +127,11 @@ function Dashboard() {
               <h2>A forecast you can check.</h2>
               <p>
                 Freeze a prediction using current and past measurements. Then
-                play the next two seconds of real NGSIM traffic and reveal the
-                observed outcome.
+                explore dataset-wide lane-change patterns, then run a model-scored
+                traffic simulation.
               </p>
-              <NavLink className="link-button primary" to="/replay">
-                Open recorded replay <ArrowRight size={16} />
+              <NavLink className="link-button primary" to="/simulator">
+                Open the lane-change simulator <ArrowRight size={16} />
               </NavLink>
               <div className="mini-road">
                 {[0, 1, 2].map((i) => (
@@ -176,10 +170,9 @@ function Dashboard() {
                 two seconds?
               </p>
               <p>
-                <b>Recorded replay</b>
+                <b>Data-informed simulation</b>
                 <br />
-                Actual positions unfold independently of the prediction,
-                including incorrect forecasts.
+                Generated scenes follow observed distributions; their traffic is not a recorded replay.
               </p>
               <p>
                 <b>Interactive simulator</b>
@@ -212,279 +205,7 @@ function Dashboard() {
 }
 
 function RecordedReplay() {
-  const { data, source } = useResearch("replay"),
-    { data: info } = useResearch("info");
-  const [selected, setSelected] = useState(0),
-    [step, setStep] = useState(0),
-    [playing, setPlaying] = useState(false),
-    [rate, setRate] = useState(0.5);
-  useEffect(() => {
-    if (!playing) return;
-    const timer = setInterval(
-      () =>
-        setStep((s) => {
-          if (s >= 20) {
-            setPlaying(false);
-            return 20;
-          }
-          return s + 1;
-        }),
-      100 / rate,
-    );
-    return () => clearInterval(timer);
-  }, [playing, rate]);
-  if (!data)
-    return (
-      <>
-        <Heading
-          eyebrow="HELD-OUT NGSIM DATA"
-          title="Prediction versus recorded outcome"
-          source={source}
-        >
-          The forecast is frozen before the next two seconds are shown.
-        </Heading>
-        <p>{source}</p>
-      </>
-    );
-  const e = data.examples[selected],
-    frame = e.snapshots[step],
-    ego = frame.cars.find((c) => c.id === e.vehicle_id),
-    revealed = step === 20;
-  const all = e.snapshots.flatMap((s) => s.cars),
-    minX = Math.min(...all.map((c) => c.x - c.length)) - 10,
-    maxX = Math.max(...all.map((c) => c.x)) + 15,
-    width = Math.max(90, maxX - minX);
-  const label = (v) => (v ? "Lane change" : "Stay in lane");
-  const reset = () => {
-    setPlaying(false);
-    setStep(0);
-  };
-  return (
-    <>
-      <Heading
-        eyebrow="HELD-OUT NGSIM DATA / 0.1 s OBSERVATIONS"
-        title="Prediction versus recorded outcome"
-        source={source}
-      >
-        The forecast uses assessment-time inputs only. Actual future positions
-        control the replay.
-      </Heading>
-      <div className="replay-layout">
-        <section>
-          <div className="panel replay-road">
-            <div className="road-toolbar">
-              <span className="live-label">ACTUAL RECORDED TRAFFIC</span>
-              <span className="spacer" />
-              <span className="mono" data-testid="replay-time">
-                {frame.seconds.toFixed(1)} / 2.0 s
-              </span>
-            </div>
-            <svg
-              className="recorded-highway"
-              role="img"
-              aria-label="Actual NGSIM traffic replay"
-              viewBox={`${minX} 0 ${width} 21.5`}
-            >
-              <rect x={minX} width={width} height="21.5" fill="#2d4437" />
-              <rect
-                x={minX}
-                y=".5"
-                width={width}
-                height="18.3"
-                fill="#252f2b"
-              />
-              {[1, 2, 3, 4].map((i) => (
-                <line
-                  key={i}
-                  x1={minX}
-                  x2={minX + width}
-                  y1={i * 3.6576}
-                  y2={i * 3.6576}
-                  stroke="#b4c0af"
-                  strokeWidth=".12"
-                  strokeDasharray="3 4"
-                />
-              ))}
-              {[0.4, 18.5].map((y) => (
-                <line
-                  key={y}
-                  x1={minX}
-                  x2={minX + width}
-                  y1={y}
-                  y2={y}
-                  stroke="#dbc97f"
-                  strokeWidth=".12"
-                />
-              ))}
-              {frame.cars.map((c) => (
-                <g key={c.id}>
-                  <rect
-                    x={c.x - c.length}
-                    y={c.y - c.width / 2}
-                    width={c.length}
-                    height={c.width}
-                    rx=".25"
-                    fill={c.id === e.vehicle_id ? "#4ed8bb" : "#99acc1"}
-                    stroke={c.id === e.vehicle_id ? "#f5f7df" : "#12241c"}
-                    strokeWidth=".15"
-                  />
-                  <rect
-                    x={c.x - 1.2}
-                    y={c.y - c.width * 0.35}
-                    width=".5"
-                    height={c.width * 0.7}
-                    fill="#294447"
-                  />
-                  {c.id === e.vehicle_id && (
-                    <text
-                      x={c.x - c.length / 2}
-                      y={c.y - c.width / 2 - 1.1}
-                      textAnchor="middle"
-                      fontSize="1.3"
-                      fill="white"
-                    >
-                      Vehicle {c.id}
-                    </text>
-                  )}
-                </g>
-              ))}
-              <text x={minX + 4} y="20.5" fill="#c0d3bd" fontSize="1.1">
-                Recorded front-center positions · travel →
-              </text>
-            </svg>
-            <div className="playback">
-              <Button
-                className="primary"
-                icon={playing ? Pause : Play}
-                onClick={() => {
-                  if (step === 20) setStep(0);
-                  setPlaying(!playing);
-                }}
-              >
-                {playing ? "Pause replay" : "Play recorded future"}
-              </Button>
-              <Button icon={RotateCcw} onClick={reset}>
-                Reset replay
-              </Button>
-              <select
-                aria-label="Replay speed"
-                value={rate}
-                onChange={(ev) => setRate(+ev.target.value)}
-              >
-                {[0.5, 1, 2].map((v) => (
-                  <option key={v} value={v}>
-                    {v}× speed
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="replay-scrubber">
-              <input
-                aria-label="Recorded replay time"
-                type="range"
-                min="0"
-                max="20"
-                value={step}
-                onChange={(ev) => {
-                  setPlaying(false);
-                  setStep(+ev.target.value);
-                }}
-              />
-              <span>Assessment at 0.0 s</span>
-              <span>Observed window complete at 2.0 s</span>
-            </div>
-          </div>
-          <div className="prediction-grid">
-            <div className="panel result-card">
-              <span className="eyebrow">FROZEN MODEL FORECAST</span>
-              <h2 data-testid="replay-prediction">{label(e.predicted)}</h2>
-              <strong>{pct(e.probability)}</strong>
-              <p>
-                Estimated lane-change score at 0.0 s ·{" "}
-                {info?.name || "Selected classifier"}
-              </p>
-              <small>
-                Threshold {info ? pct(info.decision_threshold) : "…"};
-                uncalibrated score.{" "}
-                {e.supported
-                  ? "Within marginal training ranges."
-                  : "Offline test evaluation outside marginal training ranges; live inference would be withheld."}
-              </small>
-            </div>
-            <div
-              className={`panel result-card ${revealed ? (e.predicted === e.actual ? "correct-result" : "incorrect-result") : ""}`}
-            >
-              <span className="eyebrow">RECORDED OUTCOME</span>
-              <h2 data-testid="replay-outcome">
-                {revealed ? label(e.actual) : "Play to reveal"}
-              </h2>
-              <strong>
-                {revealed
-                  ? e.predicted === e.actual
-                    ? "Correct"
-                    : "Incorrect"
-                  : "—"}
-              </strong>
-              <p>
-                {revealed
-                  ? "Checked against actual future lane IDs, not a rule-based animation."
-                  : `Current recorded lane: ${ego?.lane ?? "outside view"}. Outcome is revealed after the complete window.`}
-              </p>
-            </div>
-          </div>
-          <p className="footnote">
-            <Info size={14} />
-            Examples cover correct and incorrect forecasts where available; they
-            are not a random estimate of performance. Full test metrics appear
-            in Model Comparison. Road markings are illustrative; vehicle
-            positions/dimensions are recorded.
-          </p>
-        </section>
-        <aside className="panel replay-inspector">
-          <h2>Recorded observation</h2>
-          <Field label="Held-out example">
-            <select
-              aria-label="Held-out example"
-              value={selected}
-              onChange={(ev) => {
-                setSelected(+ev.target.value);
-                reset();
-              }}
-            >
-              {data.examples.map((v, i) => (
-                <option key={v.id} value={i}>
-                  Example {i + 1} · Vehicle {v.vehicle_id} · Lane{" "}
-                  {v.initial_lane}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <p className="micro">
-            Source: held-out recording block. Nearby vehicles are recorded scene
-            context. No future measurements enter the forecast.
-          </p>
-          <div className="pair-info">
-            {info?.features.map((key) => (
-              <div key={key}>
-                <span>{key.replaceAll("_", " ")}</span>
-                <b>
-                  {Number(e.inputs[key]).toFixed(key === "has_leader" ? 0 : 2)}
-                </b>
-              </div>
-            ))}
-          </div>
-          <p className="micro">
-            Lateral speed uses the previous 0.5 s. A maneuver may already be
-            underway before its lane ID changes. This predicts crossing
-            behavior, not a driver's hidden intention or maneuver safety.
-          </p>
-          <NavLink to="/performance" className="link-button primary">
-            View full evaluation
-          </NavLink>
-        </aside>
-      </div>
-    </>
-  );
+  return <Navigate to="/simulator" replace />;
 }
 
 function Analysis() {
@@ -534,14 +255,13 @@ function Analysis() {
               <p>
                 {number(a.recorded_crossings)} adjacent crossings,{" "}
                 {number(a.vehicles)} vehicles and {number(a.rows)} observations
-                across {a.duration_seconds.toFixed(1)} seconds in one recording.
+                across {a.duration_seconds.toFixed(1)} seconds in {a.recording_count} recording blocks.
               </p>
               <p>
-                Generated scenes can initialize from {a.traffic_seeds.length}{" "}
-                coherent training-period snapshots. Adapting them to a different
-                lane count or preventing initial overlaps changes the original
-                scene. The separate Recorded replay preserves observed
-                positions.
+                Generated scenes sample the aggregate speed, acceleration, vehicle-type
+                and size distributions. They are new simulations, not copies of
+                historical vehicle positions. The notebook keeps source-trajectory
+                replay local to avoid publishing modified tracks.
               </p>
             </div>
           </div>
@@ -775,46 +495,45 @@ function About() {
           in its current lane throughout a complete window. Label 1 means a
           crossing was observed. Missing or truncated windows are excluded.
         </p>
-        <h2>What does NGSIM contain?</h2>
+        <h2>What does Automatum contain?</h2>
         <p>
           <a
-            href="https://www.fhwa.dot.gov/publications/research/operations/07030/index.cfm"
+            href="https://huggingface.co/datasets/AutomatumData/automatum-data-full-highway"
             target="_blank"
             rel="noreferrer"
           >
-            FHWA's US-101 trajectory recording ↗
+            Automatum Full Highway dataset ?
           </a>{" "}
-          provides vehicle positions, lanes, speeds and dimensions every 0.1 s.
-          This project uses one complete origin, not the entire three-period
-          release. Vehicle classes are joined from the official source. There
-          are no verified crash labels.
+          contains drone-tracked German Autobahn traffic, including positions,
+          lane and road IDs, speeds, acceleration, vehicle dimensions and
+          current-lane/neighbor relationships at about 30 frames per second. It
+          records no verified crash labels. The published data uses CC BY-ND
+          4.0, so this public site shows aggregate results rather than modified
+          source tracks.
         </p>
         <h2>What goes into the prediction?</h2>
         <p>
-          Current speed, acceleration, leader gap, closing speed and leader
-          presence, plus absolute lateral motion over the preceding 0.5 s.
-          Current reported leaders are matched at the same timestamp and lane. A
-          maneuver can already be underway before lane-ID crossing, so this is
-          not a guaranteed prediction of hidden intention before any movement.
+          Longitudinal speed, acceleration, vehicle-frame lateral velocity, vehicle type,
+          front-leader gap and closing speed, plus front/rear gaps and relative
+          speeds in each adjacent lane. Missing neighbors use an explicit
+          presence flag and a capped-gap value. The target is an observed lane-ID
+          crossing in the next two seconds; a maneuver can already be underway.
         </p>
         <h2>What controls the cars?</h2>
         <p>
-          Recorded replay uses actual future positions, independent of the
-          forecast. Interactive simulation uses deterministic cruising, braking,
-          clearance and lane-change rules. The behavior score neither selects a
-          lane nor acts as a safety veto. Vehicle-body overlap detects
-          hypothetical simulated contact. Already-collided vehicles remain
-          stopped obstacles.
+          The website generates new traffic scenes from aggregate dataset
+          distributions. Its lane-change and braking rules are programmed and
+          separate from the learned behavior score. The score does not choose a
+          lane or act as a safety veto. Vehicle-body overlap detects hypothetical
+          simulated contact; the dataset provides no crash outcome labels.
         </p>
         <h2>Are generated cars sampled from the dataset?</h2>
         <p>
-          The default generator adapts coherent training-period snapshots. It
-          preserves the selected vehicles' measured initial speeds,
-          accelerations and sizes, while remapping lane indices and separating
-          overlaps when necessary. Explicit synthetic random ranges and
-          deliberately constructed presets are also available. Adapted scenes do
-          not guarantee exact empirical distributions or reproduce historical
-          accidents.
+          The default generator samples aggregate speed, acceleration, truck
+          share and vehicle dimensions from the training data. Positions and lane
+          assignments are newly generated, and the scene is not a historical
+          replay. Fully synthetic ranges and deliberately constructed presets
+          remain available.
         </p>
         <h2>What changed from the earlier project?</h2>
         <p>
@@ -860,7 +579,7 @@ function About() {
 }
 const nav = [
   ["/", "Dashboard", Layers],
-  ["/replay", "Recorded replay", Play],
+  ["/simulator", "Lane-change lab", Car],
   ["/analysis", "Distributions", BarChart3],
   ["/simulator", "Simulator", Car],
   ["/performance", "Model comparison", GitBranch],

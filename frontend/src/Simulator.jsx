@@ -21,7 +21,7 @@ import {
 import {
   createWorld,
   generate,
-  generateFromSnapshot,
+  generateFromProfile,
   saveInitial,
   reset,
   tick,
@@ -57,12 +57,12 @@ export default function Simulator() {
     [version, render] = useState(0);
   const { data: behaviorInfo } = useResearch("info");
   const { data: analytics } = useResearch("analytics");
-  const [initialization, setInitialization] = useState("recorded");
+  const [initialization, setInitialization] = useState("profile");
   useEffect(() => {
     w.behaviorModel = behaviorInfo;
   }, [behaviorInfo]);
   useEffect(() => {
-    w.trafficSeeds = analytics?.traffic_seeds;
+    w.trafficProfile = analytics?.simulator_profile;
   }, [analytics]);
   const [count, setCount] = useState(6),
     [seed, setSeed] = useState("42"),
@@ -247,12 +247,12 @@ export default function Simulator() {
     mutate(() => {
       const value = seed === "" ? Date.now() : Number(seed);
       w.cars =
-        initialization === "recorded"
-          ? generateFromSnapshot(w.lanes, count, value, w.trafficSeeds)
+        initialization === "profile"
+          ? generateFromProfile(w.lanes, count, value, w.trafficProfile)
           : generate(w.lanes, count, value);
       w.initializationSource =
-        initialization === "recorded"
-          ? "Adapted NGSIM training snapshot"
+        initialization === "profile"
+          ? "New scene sampled from Automatum distributions"
           : "Configured synthetic random ranges";
       w.time = 0;
       w.events = [];
@@ -318,13 +318,13 @@ export default function Simulator() {
               value={initialization}
               onChange={(e) => setInitialization(e.target.value)}
             >
-              <option value="recorded">Adapted NGSIM snapshot</option>
+              <option value="profile">Automatum data distributions</option>
               <option value="synthetic">Synthetic random ranges</option>
             </select>
           </Field>
           <p className="micro">
             {w.initializationSource ||
-              "Presets are constructed simulations, separate from recorded replay."}
+              "Generated scenes follow aggregate Automatum measurements; they are not historical replays."}
           </p>
           <Field label="Number of Lanes">
             <select
@@ -373,7 +373,7 @@ export default function Simulator() {
             icon={RotateCcw}
             onClick={randomize}
             disabled={
-              initialization === "recorded" && !analytics?.traffic_seeds?.length
+              initialization === "profile" && !analytics?.simulator_profile
             }
           >
             Generate Random Traffic
@@ -1136,8 +1136,8 @@ export default function Simulator() {
         <Info size={14} />
         Behavior scores estimate a recorded lane crossing, not accident risk or
         the best lane. Generated scenes use a separate rule-based controller and
-        geometric contact detection. Choose Recorded replay to compare
-        predictions with actual outcomes.
+        geometric contact detection. The model score is an estimate, not a
+        command to change lanes.
       </p>
     </>
   );

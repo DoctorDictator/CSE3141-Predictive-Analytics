@@ -1,197 +1,322 @@
 {
   "task": "lane-change-behavior",
-  "version": "behavior-1",
-  "selected_model": "Logistic Regression",
+  "version": "behavior-3",
+  "selected_model": "QDA",
   "comparison": [
     {
       "name": "Logistic Regression",
-      "cv_f1": 0.1256854256854257,
+      "cv_f1": 0.16641241815159494,
       "parameters": {
         "model__C": 1,
-        "model__class_weight": null
+        "model__class_weight": "balanced"
       },
-      "threshold": 0.1,
-      "training": {
-        "accuracy": 0.9781302653300883,
-        "precision": 0.27120315581854043,
-        "recall": 0.33495736906211937,
-        "f1": 0.2997275204359673,
-        "roc_auc": 0.8293303232497131,
-        "average_precision": 0.20503322284303618,
-        "balanced_accuracy": 0.6611009573838628,
+      "threshold": 0.7,
+      "validation": {
+        "accuracy": 0.8750633746570823,
+        "precision": 0.16504793923546257,
+        "recall": 0.3667173882971365,
+        "f1": 0.22764157829204415,
+        "roc_auc": 0.7642070952604318,
+        "average_precision": 0.1580318883745579,
+        "balanced_accuracy": 0.6343261105690543,
         "confusion_matrix": [
           [
-            57197,
-            739
+            123345,
+            13411
           ],
           [
-            546,
-            275
+            4578,
+            2651
           ]
         ]
       },
-      "validation": {
-        "accuracy": 0.9821440558501712,
-        "precision": 0.3435897435897436,
-        "recall": 0.32682926829268294,
-        "f1": 0.335,
-        "roc_auc": 0.8017766430046549,
-        "average_precision": 0.2243387455632761,
-        "balanced_accuracy": 0.6590585219764531,
+      "training": {
+        "accuracy": 0.8895030883390316,
+        "precision": 0.15601281419418433,
+        "recall": 0.3715811714990022,
+        "f1": 0.21975771460307542,
+        "roc_auc": 0.7793716699451329,
+        "average_precision": 0.14804173196006404,
+        "balanced_accuracy": 0.6418607728895547,
         "confusion_matrix": [
           [
-            14564,
-            128
+            355566,
+            34249
           ],
           [
-            138,
-            67
+            10707,
+            6331
           ]
         ]
       }
     },
     {
       "name": "LDA",
-      "cv_f1": 0.19837645865043121,
+      "cv_f1": 0.15803198095246007,
       "parameters": {
-        "model__priors": null,
-        "model__shrinkage": 0.1
+        "model__priors": [
+          0.5,
+          0.5
+        ],
+        "model__shrinkage": "auto"
       },
-      "threshold": 0.6,
-      "training": {
-        "accuracy": 0.9777728611059108,
-        "precision": 0.26108374384236455,
-        "recall": 0.3227771010962241,
-        "f1": 0.2886710239651416,
-        "roc_auc": 0.8136204139407388,
-        "average_precision": 0.1807765527121136,
-        "balanced_accuracy": 0.6549158910617823,
+      "threshold": 0.7,
+      "validation": {
+        "accuracy": 0.8738757509462791,
+        "precision": 0.1539727761949984,
+        "recall": 0.3364227417346798,
+        "f1": 0.21125781792911744,
+        "roc_auc": 0.7503084004512992,
+        "average_precision": 0.1390005418516145,
+        "balanced_accuracy": 0.619354282330091,
         "confusion_matrix": [
           [
-            57186,
-            750
+            123393,
+            13363
           ],
           [
-            556,
-            265
+            4797,
+            2432
           ]
         ]
       },
-      "validation": {
-        "accuracy": 0.9798617171242532,
-        "precision": 0.30612244897959184,
-        "recall": 0.36585365853658536,
-        "f1": 0.3333333333333333,
-        "roc_auc": 0.8030711918880691,
-        "average_precision": 0.20476083940310028,
-        "balanced_accuracy": 0.6771413677926597,
+      "training": {
+        "accuracy": 0.8871091032879197,
+        "precision": 0.1422663562973602,
+        "recall": 0.33718746331729077,
+        "f1": 0.2001044932079415,
+        "roc_auc": 0.7659930780911952,
+        "average_precision": 0.12996950871210836,
+        "balanced_accuracy": 0.6241662468260967,
         "confusion_matrix": [
           [
-            14522,
-            170
+            355178,
+            34637
           ],
           [
-            130,
-            75
+            11293,
+            5745
           ]
         ]
       }
     },
     {
       "name": "QDA",
-      "cv_f1": 0.191123418839658,
+      "cv_f1": 0.22867304267975017,
       "parameters": {
         "model__priors": null,
-        "model__reg_param": 0.2
+        "model__reg_param": 0.1
       },
       "threshold": 0.4,
-      "training": {
-        "accuracy": 0.96352774988512,
-        "precision": 0.1606776180698152,
-        "recall": 0.3812423873325213,
-        "f1": 0.2260743950884796,
-        "roc_auc": 0.8446711727098758,
-        "average_precision": 0.10461763946292058,
-        "balanced_accuracy": 0.6765107959860618,
+      "validation": {
+        "accuracy": 0.8793832690905302,
+        "precision": 0.18550688671051,
+        "recall": 0.41361184119518607,
+        "f1": 0.25613569195185676,
+        "roc_auc": 0.7896951444684421,
+        "average_precision": 0.16292871318787608,
+        "balanced_accuracy": 0.6588080265381002,
         "confusion_matrix": [
           [
-            56301,
-            1635
+            123628,
+            13128
           ],
           [
-            508,
-            313
+            4239,
+            2990
           ]
         ]
       },
-      "validation": {
-        "accuracy": 0.9675102369604618,
-        "precision": 0.1934065934065934,
-        "recall": 0.4292682926829268,
-        "f1": 0.26666666666666666,
-        "roc_auc": 0.824347247216006,
-        "average_precision": 0.11486491409310101,
-        "balanced_accuracy": 0.7021443559793615,
+      "training": {
+        "accuracy": 0.8828864479308252,
+        "precision": 0.16279633383273112,
+        "recall": 0.4336776616973823,
+        "f1": 0.2367282862909685,
+        "roc_auc": 0.8000159349278642,
+        "average_precision": 0.14816847771009806,
+        "balanced_accuracy": 0.6680990440267371,
         "confusion_matrix": [
           [
-            14325,
-            367
+            351816,
+            37999
           ],
           [
-            117,
-            88
+            9649,
+            7389
           ]
         ]
       }
     }
   ],
   "test": {
-    "accuracy": 0.9878581560283688,
-    "precision": 0.22695035460992907,
-    "recall": 0.23357664233576642,
-    "f1": 0.2302158273381295,
-    "roc_auc": 0.8873312920309067,
-    "average_precision": 0.1645228354555062,
-    "balanced_accuracy": 0.6136718984780387,
+    "accuracy": 0.8699123902938689,
+    "precision": 0.13018811585547924,
+    "recall": 0.49783055492121486,
+    "f1": 0.2064003029729218,
+    "roc_auc": 0.8002821906095305,
+    "average_precision": 0.12057050510626804,
+    "balanced_accuracy": 0.6904156630399404,
     "confusion_matrix": [
       [
-        17379,
-        109
+        109923,
+        14565
       ],
       [
-        105,
-        32
+        2199,
+        2180
       ]
     ]
   },
   "baseline": {
     "name": "Always stay in lane",
-    "accuracy": 0.99222695035461,
+    "accuracy": 0.9660192291277053,
     "precision": 0.0,
     "recall": 0.0,
     "f1": 0.0,
     "balanced_accuracy": 0.5,
     "roc_auc": 0.5,
-    "average_precision": 0.007773049645390071
+    "average_precision": 0.03398077087229469
   },
   "split_sizes": {
-    "train": 58757,
-    "validation": 14897,
-    "test": 17625
+    "train": 406853,
+    "validation": 143985,
+    "test": 128867
   },
   "class_counts": {
     "train": {
-      "0": 57936,
-      "1": 821
+      "0": 389815,
+      "1": 17038
     },
     "validation": {
-      "0": 14692,
-      "1": 205
+      "0": 136756,
+      "1": 7229
     },
     "test": {
-      "0": 17488,
-      "1": 137
+      "0": 124488,
+      "1": 4379
     }
   },
-  "protocol": "Chronological 60/20/20; disjoint ego and current leader trajectories; full two-second outcome embargo; purged training CV; validation selection; once-only test"
+  "split_recordings": {
+    "train": [
+      "hw-a9-appershofen-004-e7ee10c6-a428-4416-bd84-cebb0476f565",
+      "hw-a9-appershofen-005-dc8c9357-291c-4b27-8c3d-98a048818efd",
+      "hw-a9-appershofen-007-55244cc7-f80a-49dc-a29d-ed707b6ea4fb",
+      "hw-a9-appershofen-011-b932653c-ea9c-424a-a8cc-51fb75ad9d59",
+      "hw-a9-appershofen-012-d696e4f3-70ac-45ac-9de1-79a2c9f6185c",
+      "hw-a9-appershofen-013-7e5d812c-a86f-468c-b9ed-d6888991eeb7",
+      "hw-a9-appershofen-014-29b621a2-e0d5-483b-b0c7-de3b7b990cb8",
+      "hw-a9-appershofen-016-332aed83-f9c3-4f12-947b-f8b3d83c1281",
+      "hw-a9-apperszell-012-0329f7e1-2575-4da5-b0c9-36fa7b33280f",
+      "hw-a9-brunn-001-b0ff8032-cc0c-49f8-9f62-b468e7034287",
+      "hw-a9-brunn-004-90f5df2e-cee7-430b-8339-1d280f2ba35e",
+      "hw-a9-brunn-005-8b45f56f-d38f-4633-b357-29385e871031",
+      "hw-a9-brunn-007-e87cec60-66cd-4da6-9be6-483cc088fd67",
+      "hw-a9-brunn-008-a164dd52-795d-4b47-9b37-093a601c0fa4",
+      "hw-a9-brunn-010-08ee8216-ee20-4589-a468-290c2ecc723b",
+      "hw-a9-denkendorf-003-2c3aa05f-c5c9-4b88-a156-391e8434858b",
+      "hw-a9-denkendorf-007-5f3dc8c3-73f3-4a6a-8083-86f69d3e20e2",
+      "hw-a9-denkendorf-008-eb2d8139-baa7-4834-a7c6-9fe76e38e153",
+      "hw-a9-denkendorf-011-c52c1b2a-f7e2-4292-95eb-4c5c3cd66bb4",
+      "hw-a9-denkendorf-013-90a772f1-f750-40e0-a34c-23c57981de35",
+      "hw-a9-denkendorf-040-3560728d-6b82-4e0b-bcfa-ec0724528c23",
+      "hw-a9-denkendorf-041-61fe91c6-ce5d-46ba-ab86-4a8b6cbde0e7",
+      "hw-a9-denkendorf-042-3ee22827-7150-4b41-bbc8-134e4b8c3b9f",
+      "hw-a9-denkendorf-043-ea62b201-33c7-4ed6-bbbf-69aa2bb7add3",
+      "hw-a9-denkendorf-045-e2152022-abc8-4f94-ac35-c2792bcb82df",
+      "hw-a9-denkendorf-046-6195d882-9610-4200-a6fa-5a2663d3e8e1",
+      "hw-a9-denkendorf-050-455a7607-fa37-40ae-85a3-47d41671e32b",
+      "hw-a9-denkendorf-051-9cf607ab-5495-4e53-9bd6-add5904fbb85",
+      "hw-a9-denkendorf-053-09f7d1ee-6a99-4430-941f-255e0f69f92a",
+      "hw-a9-denkendorf-054-b7070020-701a-4ee1-9413-4b318f8b8db0",
+      "hw-a9-denkendorf-056-d06e7cc0-633e-4da6-9c78-05bd32e894a5",
+      "hw-a9-denkendorf-057-b0d5f340-3ac9-4c34-b13b-5d6ca0e367a4",
+      "hw-a9-denkendorf-058-74a2d848-4fb5-4a8c-86a2-9f1e760584c1",
+      "hw-a9-denkendorf-059-ed6acefc-5068-4006-8ff9-56ab3eb93496",
+      "hw-a9-denkendorf-062-1666b1ea-ab1a-494a-b8b1-333b03ca72f9",
+      "hw-a9-dunzendorf-001-2eacde43-2475-4b0e-8a75-51174b2890f4",
+      "hw-a9-dunzendorf-002-5fb0a155-fd7b-4aa5-bc03-ead5d2e16bce",
+      "hw-a9-dunzendorf-003-e113cd9f-a0cf-4693-a20e-6b9254a054cd",
+      "hw-a9-dunzendorf-004-4821830a-87d7-4f2d-ab8b-fa5ba4bc9bf1",
+      "hw-a9-dunzendorf-006-55788231-6ca8-43a5-9a9a-abcc316e476b",
+      "hw-a9-dunzendorf-007-2ecc3fd8-b9a0-4eff-b817-556e4ace4f1b",
+      "hw-a9-dunzendorf-008-aa61d6ee-2db3-45d4-9ce0-098a34743366",
+      "hw-a9-dunzendorf-011-7f5292de-08d0-415b-8a0e-668c38a17671",
+      "hw-a9-hausen-008-7517312b-1864-4a9e-8306-0f47b82e52ba",
+      "hw-a9-hausen-013-bf15e121-4187-41e7-b4ad-da0b66be29db",
+      "hw-a9-hausen-015-bf633cc4-8a5d-45d1-98ef-ef5da49c0e65",
+      "hw-a9-hausen-016-1c1b7a7d-5209-4165-b7bc-3b82abdd4c35",
+      "hw-a9-heppbergpark-003-81e8160b-66bf-4cd9-bd62-b5a7eeab0375",
+      "hw-a9-ingolstadtnord-002-52a68945-d3be-4128-847c-138715d7e9b9",
+      "hw-a9-kinding-014-c4f1db54-8cae-4476-8501-9cd0c0c34b0b",
+      "hw-a9-kinding-016-6bff782f-1f30-496f-931d-d358fefdfc6b",
+      "hw-a9-kinding-020-4e49626c-95f3-4e2c-8816-64aee7cbceeb",
+      "hw-a9-kinding-025-c5052279-63f7-4100-b445-2f9e938e9da9",
+      "hw-a9-kinding-026-b18bdd1c-2238-4307-a8a8-6080969fb8cb",
+      "hw-a9-stammhamm-001-c9180c3a-c643-4efe-803d-eb93fa8382af",
+      "hw-a9-stammhamm-002-a0b2a3cf-1f01-46b6-90ef-44352f95d942",
+      "hw-a9-stammhamm-005-478f99b8-4e10-46fb-9fdc-3b03c1d28624",
+      "hw-a9-stammhamm-012-f5820908-4c14-4e7b-8deb-c278157f0617",
+      "hw-a9-stammhamm-013-6440a903-6722-42a9-bb4c-03eff1bc4927",
+      "hw-a9-stammhamm-014-df63e498-6313-4cd6-8495-c612dbc541ab",
+      "hw-a9-stammhamm-015-39f0066a-28f0-4a68-b4e8-5d5024720c4e",
+      "hw-a9-stammhamm-016-eb79c4ad-eda3-4129-a8b6-e0fe209ba894",
+      "hw-a9-stammhamm-020-e2c1164d-198b-4aff-9ff0-cb39bab92a4b",
+      "hw-a9-stammhamm-023-2622d4b7-267b-4a01-81a0-470ab286e20c",
+      "hw-a9-stammhamm-025-7b0e687a-0cf5-48d0-a710-883373e8f335",
+      "hw-a9-untermaessing-001-a55a8c27-14c0-4d5a-a9a5-edf10e18f2f8",
+      "hw-a9-untermaessing-004-63f9163b-8609-47ae-b76c-31f9df010830",
+      "hw-a9-untermaessing-007-52b857cf-170f-444e-b6cd-3db28add9535"
+    ],
+    "validation": [
+      "hw-a9-appershofen-001-d8087340-8287-46b6-9612-869b09e68448",
+      "hw-a9-appershofen-002-2234a9ae-2de1-4ad4-9f43-65c2be9696d6",
+      "hw-a9-brunn-002-30250d63-e5d7-44b4-9e56-4a29534a9b09",
+      "hw-a9-brunn-003-c50fba22-c92e-43cb-92d3-c856b78f77b4",
+      "hw-a9-brunn-009-a65fa0da-5bc5-4d9d-80b5-7afd86d6704d",
+      "hw-a9-denkendorf-006-a1fb9f3f-8263-45b4-bb74-2b62523e48b6",
+      "hw-a9-denkendorf-009-3dc891bb-f8d4-4ce4-bfbe-e88bd8ace2f4",
+      "hw-a9-denkendorf-012-bb2e9076-b23c-4993-a8dd-87ce5f587875",
+      "hw-a9-denkendorf-037-67b77921-b0e0-4a41-8f55-9e3d5b50f98a",
+      "hw-a9-denkendorf-039-e6de42a6-763e-46b4-bbc0-560938dda9e7",
+      "hw-a9-denkendorf-044-43d3b645-9f53-4d12-a302-9169e8a00f81",
+      "hw-a9-denkendorf-055-f9c73583-05b5-4c28-aeca-f60d53bd4b33",
+      "hw-a9-dunzendorf-005-73a4aa3a-a287-4b60-9482-6d45224b03ed",
+      "hw-a9-dunzendorf-010-37c5fcab-77bd-4323-a332-995a76a99928",
+      "hw-a9-hausen-011-978c06fa-71d1-45f9-8569-248a6cfcce5f",
+      "hw-a9-kinding-015-18904cb3-9afc-4d81-bb3e-3eadee541abd",
+      "hw-a9-stammhamm-007-f0c141fe-2881-4c9b-96d1-ccdc02c6126c",
+      "hw-a9-stammhamm-021-3d17c4f2-33bd-479a-9049-1b9f0db31c92",
+      "hw-a9-stammhamm-022-5d50ae13-7526-43af-a18c-d64e4c09679d",
+      "hw-a9-untermaessing-002-17b2453f-c017-46d2-8039-46e0d20fa188",
+      "hw-a9-untermaessing-005-2bf77d20-9ce8-4aa2-97a1-bc46fa0c9fba",
+      "hw-a9-untermaessing-006-a76d984b-b821-40a3-a4bc-4e7f2f2798bb"
+    ],
+    "test": [
+      "hw-a9-appershofen-003-6d6e3378-df9b-4130-8cbf-3437a77a309d",
+      "hw-a9-appershofen-006-7e386963-33f2-4e71-a750-76cc66791d43",
+      "hw-a9-appershofen-008-44cb097b-ce86-4d2d-b509-0e0c5b5b7ad5",
+      "hw-a9-appershofen-009-2caba3d6-ef31-48c8-b8e1-d9c6a300a68a",
+      "hw-a9-apperszell-010-5a04160f-c961-4d9a-8f78-1dd6cc3956e4",
+      "hw-a9-denkendorf-002-806f9df5-3599-4f69-94c3-92ee327992e7",
+      "hw-a9-denkendorf-005-d2c2e9bd-6500-4efd-a451-eca9492cd82a",
+      "hw-a9-denkendorf-035-de265ba6-96d4-431f-a91c-b25de3f9fd69",
+      "hw-a9-denkendorf-038-2168e1be-1e64-4138-9f21-5fe8664d6409",
+      "hw-a9-denkendorf-047-cf164056-877e-464a-9da2-6b725de7fcee",
+      "hw-a9-denkendorf-048-bef98cde-3e5b-4c2f-ba9c-727455fd7bd6",
+      "hw-a9-denkendorf-049-0bddc4d7-7377-4c53-b70d-d331ed3b114c",
+      "hw-a9-denkendorf-052-21d311ac-2156-4db5-8baf-36a76095a2df",
+      "hw-a9-denkendorf-060-f1784562-bb7d-482c-b3ed-1b5ad82dfbc0",
+      "hw-a9-dunzendorf-012-238ffda9-9bc2-41f8-b4e8-63eeef38b192",
+      "hw-a9-hausen-009-d8c8e19d-8302-49f8-a76c-3e2decadd66f",
+      "hw-a9-hausen-012-9d1ebb41-2abc-40ee-b075-71a592dfc5d7",
+      "hw-a9-heppbergpark-002-2f4bbc0c-b4f4-4f1e-aea0-95c25603ca34",
+      "hw-a9-heppbergpark-006-eabe6201-0090-49e0-a93a-128c3a34c6ac",
+      "hw-a9-kinding-017-d788dfbd-a17a-482c-9b89-2ef1978d7d72",
+      "hw-a9-kinding-024-d1ac2b38-b705-41f1-8d65-2bfadc5ea8a6",
+      "hw-a9-kinding-029-43140646-433d-47e4-b5c4-be128594fdad",
+      "hw-a9-stammhamm-006-33a00c80-bd6b-4ccf-8fde-348fbb48fdea",
+      "hw-a9-stammhamm-008-2d77e236-1728-4492-99f7-4582ecaa6bee"
+    ]
+  },
+  "protocol": "60/20/20 whole-recording group split; three-fold GroupKFold inside training recordings; threshold and model selected on validation; held-out recording test used once"
 }

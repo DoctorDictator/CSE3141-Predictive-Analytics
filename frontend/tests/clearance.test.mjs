@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {createWorld,vehicle,laneAssessment,loadScenario,tick,STEP,requestLaneChange,generateFromSnapshot,observations} from '../src/simulation.js';
+import {createWorld,vehicle,laneAssessment,loadScenario,tick,STEP,requestLaneChange,generateFromProfile,observations} from '../src/simulation.js';
 const advance=(w,s)=>{for(let i=0;i<s/STEP;i++)tick(w);};
 test('six-lane bypass remains independent of any behavior prediction',()=>{
   const a=createWorld(),b=createWorld();loadScenario(a,'Six-Lane Blockage - Safe Bypass');loadScenario(b,'Six-Lane Blockage - Safe Bypass');
@@ -17,8 +17,10 @@ test('rear approach and full lateral path are checked geometrically',()=>{
   w.cars=[vehicle(1,0,20,20),vehicle(2,0,30,0)];assert.equal(laneAssessment(w,w.cars[0],1).clear,false);
 });
 test('simultaneous merges reserve the path',()=>{const w=createWorld();w.cars=[vehicle(1,0,50,12),vehicle(2,2,50,12)];assert.equal(requestLaneChange(w,w.cars[0],1),true);assert.equal(requestLaneChange(w,w.cars[1],1),false);});
-test('adapted recorded snapshots are seeded, retain measurements and valid lanes',()=>{
+test('aggregate-profile traffic is seeded and remains within the selected road',()=>{
   const a=JSON.parse(fs.readFileSync(new URL('../public/data/analytics.json',import.meta.url)));
-  const cars=generateFromSnapshot(6,30,42,a.traffic_seeds);assert.deepEqual(cars,generateFromSnapshot(6,30,42,a.traffic_seeds));assert.equal(cars.length,30);assert.ok(cars.every(c=>c.sourceId&&c.lane<6));
-  const original=a.traffic_seeds.flat().find(c=>c.source_id===cars[0].sourceId&&c.speed===cars[0].speed);assert.ok(original);assert.equal(cars[0].length,original.length);
+  const cars=generateFromProfile(6,30,42,a.simulator_profile);
+  assert.deepEqual(cars,generateFromProfile(6,30,42,a.simulator_profile));
+  assert.equal(cars.length,30);
+  assert.ok(cars.every(c=>c.lane>=0&&c.lane<6&&c.speed>=0&&c.sourceId===undefined));
 });

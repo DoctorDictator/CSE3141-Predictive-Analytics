@@ -7,3 +7,4 @@ nbclient==0.10.2
 ipykernel==6.31.0
 jupyterlab==4.4.7
 threadpoolctl==3.5.0
+ijson==3.4.0.post0

@@ -12,7 +12,7 @@ export async function request(path, options = {}) {
 }
 async function saved(name) {
   const r = await fetch(
-    `${import.meta.env.BASE_URL}data/${name}.json?v=behavior-1`,
+    `${import.meta.env.BASE_URL}data/${name}.json?v=behavior-3`,
   );
   if (!r.ok) throw new Error("Recorded research export is unavailable.");
   return {
@@ -33,7 +33,6 @@ export async function loadResearch(name) {
             info: "/api/model/info",
             metrics: "/api/model/metrics",
             analytics: "/api/analytics",
-            replay: "/api/replay",
           }[name],
         ),
       ),

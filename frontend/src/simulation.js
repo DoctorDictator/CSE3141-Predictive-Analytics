@@ -254,7 +254,7 @@ export function requestLaneChange(w, car, lane) {
 
 export function setLanes(w, lanes) {
   w.lanes = lanes;
-  // Old snapshots refer to different road geometry and must not be replayed.
+  // Clear motion history when road geometry changes.
   w.history = [];
   w.historyClock = 0;
   // Lane compression redistributes vehicles safely rather than creating accidental contacts.
@@ -296,7 +296,7 @@ export function addCar(w) {
   return null;
 }
 export function loadScenario(w, name) {
-  const trafficSeeds = w.trafficSeeds;
+  const trafficProfile = w.trafficProfile;
   Object.assign(
     w,
     createWorld(
@@ -305,7 +305,7 @@ export function loadScenario(w, name) {
       42,
     ),
   );
-  w.trafficSeeds = trafficSeeds;
+  w.trafficProfile = trafficProfile;
   if (name === "Normal Highway Traffic")
     w.cars.forEach((c) => {
       c.speed = 14 + c.lane * 2;
@@ -563,6 +563,42 @@ export function behaviorObservation(w, c) {
   if (!before) return null;
   const l = leader(w, c);
   const dt = w.time - old.time;
+  const neighbor = (lane, position) => {
+    if (lane < 0 || lane >= w.lanes) return null;
+    const candidates = w.cars.filter(
+      (v) =>
+        v.id !== c.id &&
+        v.lane === lane &&
+        (position === "front" ? v.x > c.x : v.x < c.x),
+    );
+    return position === "front"
+      ? candidates.sort((a, b) => a.x - b.x)[0] || null
+      : candidates.sort((a, b) => b.x - a.x)[0] || null;
+  };
+  const adjacent = (side, position) => {
+    const other = neighbor(c.lane + (side === "left" ? -1 : 1), position);
+    const isFront = position === "front";
+    const gap = other
+      ? Math.max(
+          0,
+          Math.min(
+            150,
+            isFront
+              ? other.x - other.length - c.x
+              : c.x - c.length - other.x,
+          ),
+        )
+      : 150;
+    return {
+      [`${side}_${position}_gap`]: gap,
+      [`${side}_${position}_closing_speed`]: other
+        ? isFront
+          ? c.speed - other.speed
+          : other.speed - c.speed
+        : 0,
+      [`${side}_${position}_present`]: other ? 1 : 0,
+    };
+  };
   const inputs = {
     speed: c.speed,
     acceleration: c.actualAccel ?? c.accel,
@@ -570,6 +606,11 @@ export function behaviorObservation(w, c) {
     front_gap: l ? Math.max(0, Math.min(150, l.x - l.length - c.x)) : 150,
     closing_speed: l ? c.speed - l.speed : 0,
     has_leader: l ? 1 : 0,
+    ...adjacent("left", "front"),
+    ...adjacent("left", "rear"),
+    ...adjacent("right", "front"),
+    ...adjacent("right", "rear"),
+    is_truck: String(c.type).toLowerCase().includes("truck") ? 1 : 0,
   };
   return {
     id: String(c.id),
@@ -581,36 +622,32 @@ export function observations(w) {
   return w.cars.map((c) => behaviorObservation(w, c)).filter(Boolean);
 }
 
-export function generateFromSnapshot(lanes, count, seed, snapshots) {
-  if (!snapshots?.length)
-    throw new Error("Recorded traffic snapshots are not loaded.");
-  const rng = random(seed),
-    snapshot = snapshots[Math.floor(rng() * snapshots.length)];
-  const cars = snapshot.slice(0, count).map((v, i) =>
-    vehicle(
-      i + 1,
-      Math.min(lanes - 1, Math.floor((v.lane * lanes) / 5)),
-      v.x,
-      v.speed,
-      {
-        accel: v.accel,
-        length: v.length,
-        width: v.width,
-        type: v.type,
-        sourceId: v.source_id,
-      },
-    ),
-  );
-  // Adaptation to a different lane count can compress lanes. Separate resulting overlaps.
-  const occupied = Array.from({ length: lanes }, () => []);
-  for (const c of cars) {
-    while (
-      occupied[c.lane].some(
-        (o) => Math.abs(o.x - c.x) < Math.max(o.length, c.length) + 2,
-      )
-    )
-      c.x += Math.max(8, c.length + 3);
-    occupied[c.lane].push(c);
-  }
-  return cars;
+export function generateFromProfile(lanes, count, seed, profile) {
+  if (!profile?.speed_bins?.length || !profile?.acceleration_bins?.length)
+    throw new Error("Dataset distribution profile is not loaded.");
+  const rng = random(seed);
+  const draw = (bins, fallback) => {
+    const available = bins.filter((bin) => bin.count > 0);
+    const total = available.reduce((sum, bin) => sum + bin.count, 0);
+    if (!total) return fallback;
+    let threshold = rng() * total;
+    for (const bin of available) {
+      threshold -= bin.count;
+      if (threshold <= 0) return bin.value;
+    }
+    return available.at(-1).value;
+  };
+  return Array.from({ length: count }, (_, i) => {
+    const truck = rng() < profile.truck_probability;
+    const lane = i % lanes;
+    const row = Math.floor(i / lanes);
+    const length = truck ? profile.truck_length : profile.car_length;
+    const width = truck ? profile.truck_width : profile.car_width;
+    return vehicle(i + 1, lane, 18 + row * 30 + rng() * 6, draw(profile.speed_bins, 20), {
+      accel: draw(profile.acceleration_bins, 0),
+      length,
+      width,
+      type: truck ? "Truck" : "Car",
+    });
+  });
 }

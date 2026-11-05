@@ -23,7 +23,7 @@ const metrics = (m) =>
       r.every((v) => Number.isInteger(v) && v >= 0),
   );
 export function validateResearch(name, data) {
-  let valid = data?.task === TASK && data.version === "behavior-1";
+  let valid = data?.task === TASK && data.version === "behavior-3";
   if (name === "info")
     valid =
       valid &&
@@ -64,6 +64,7 @@ export function validateResearch(name, data) {
       [
         "rows",
         "vehicles",
+        "recording_count",
         "eligible_rows",
         "recorded_crossings",
         "duration_seconds",
@@ -77,31 +78,18 @@ export function validateResearch(name, data) {
             (v) => finite(v.value) && finite(v.count),
           ),
       ) &&
-      Array.isArray(data.traffic_seeds) &&
+      data.simulator_profile &&
+      Array.isArray(data.simulator_profile.speed_bins) &&
+      data.simulator_profile.speed_bins.length > 0 &&
+      data.simulator_profile.speed_bins.every((b) => finite(b.value) && finite(b.count) && b.count >= 0) &&
+      Array.isArray(data.simulator_profile.acceleration_bins) &&
+      data.simulator_profile.acceleration_bins.length > 0 &&
+      data.simulator_profile.acceleration_bins.every((b) => finite(b.value) && finite(b.count) && b.count >= 0) &&
+      probability(data.simulator_profile.truck_probability) &&
+      Number.isInteger(data.simulator_profile.lane_count) &&
+      data.simulator_profile.lane_count >= 1 &&
+      ["car_length", "truck_length", "car_width", "truck_width"].every((k) => finite(data.simulator_profile[k]) && data.simulator_profile[k] > 0) &&
       data.correlation;
-  else if (name === "replay")
-    valid =
-      valid &&
-      array(
-        data.examples,
-        (e) =>
-          Number.isInteger(e.actual) &&
-          [0, 1].includes(e.actual) &&
-          [0, 1].includes(e.predicted) &&
-          probability(e.probability) &&
-          e.inputs &&
-          Array.isArray(e.snapshots) &&
-          e.snapshots.length === 21 &&
-          e.snapshots.every(
-            (s) =>
-              finite(s.seconds) &&
-              array(s.cars, (c) =>
-                ["id", "x", "y", "lane", "speed", "length", "width"].every(
-                  (k) => finite(c[k]),
-                ),
-              ),
-          ),
-      );
   else valid = false;
   if (!valid) throw new Error("Incompatible lane-change behavior data.");
   return data;

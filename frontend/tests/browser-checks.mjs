@@ -1,10 +1,6 @@
 import { chromium } from "playwright";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-const artifact = (name) =>
-  JSON.parse(
-    fs.readFileSync(new URL(`../public/data/${name}.json`, import.meta.url)),
-  );
 export async function browserChecks(base, { liveApi = false } = {}) {
   const browser = await chromium.launch(
     process.platform === "win32"
@@ -33,22 +29,21 @@ export async function browserChecks(base, { liveApi = false } = {}) {
       await page.route("**/api/**", (route) =>
         route.fulfill({
           json: {
-            task: "close-following",
-            predictions: [{ id: "1", eligible: true, probability: 0.99 }],
+            task: "lane-change-behavior",
+            predictions: [{ id: "1", eligible: true, task: "lane-change-behavior", probability: 0.99, prediction: 1, label: "Lane change" }],
           },
         }),
       );
     fs.mkdirSync("test-results", { recursive: true });
-    const replay = artifact("replay");
     for (const [route, title] of [
       ["", "Predict the next lane change."],
       ["analysis", "How the recorded traffic behaves"],
       ["performance", "Compare actual behavior predictions"],
       ["about", "A question the recording can answer."],
+      ["simulator", "Highway simulator"],
     ]) {
       await page.goto(`${base}#/${route}`);
       await page.getByRole("heading", { name: title, exact: true }).waitFor();
-      if (!route) await page.getByText("1,180,598", { exact: true }).waitFor();
       if (route === "performance")
         await page.getByText("Always-stay baseline", { exact: true }).waitFor();
       await page.reload();
@@ -59,51 +54,6 @@ export async function browserChecks(base, { liveApi = false } = {}) {
         false,
       );
     }
-    await page.goto(`${base}#/replay`);
-    await page.getByLabel("Held-out example", { exact: true }).waitFor();
-    for (let index = 0; index < replay.examples.length; index++) {
-      const e = replay.examples[index];
-      await page
-        .getByLabel("Held-out example", { exact: true })
-        .selectOption(String(index));
-      assert.equal(
-        await page.getByTestId("replay-outcome").textContent(),
-        "Play to reveal",
-      );
-      const forecast = await page
-        .getByTestId("replay-prediction")
-        .textContent();
-      assert.equal(forecast, e.predicted ? "Lane change" : "Stay in lane");
-      await page.getByLabel("Recorded replay time", { exact: true }).fill("20");
-      assert.equal(
-        await page.getByTestId("replay-outcome").textContent(),
-        e.actual ? "Lane change" : "Stay in lane",
-      );
-      assert.equal(
-        await page.getByTestId("replay-prediction").textContent(),
-        forecast,
-      );
-      assert.match(
-        await page.locator(".result-card").nth(1).textContent(),
-        e.actual === e.predicted ? /Correct/ : /Incorrect/,
-      );
-    }
-    await page
-      .getByLabel("Held-out example", { exact: true })
-      .selectOption("0");
-    await page.getByLabel("Replay speed", { exact: true }).selectOption("2");
-    await page
-      .getByRole("button", { name: "Play recorded future", exact: true })
-      .click();
-    await page.waitForFunction(
-      () =>
-        document.querySelector('[data-testid="replay-time"]')?.textContent ===
-        "2.0 / 2.0 s",
-    );
-    await page.screenshot({
-      path: "test-results/behavior-recorded-replay.png",
-      fullPage: true,
-    });
     await page.goto(`${base}#/simulator`);
     await page.getByLabel("Number of Lanes", { exact: true }).selectOption("4");
     await page.getByLabel("Number of vehicles", { exact: true }).fill("12");
@@ -115,7 +65,7 @@ export async function browserChecks(base, { liveApi = false } = {}) {
       12,
     );
     await page
-      .getByText("Adapted NGSIM training snapshot", { exact: true })
+      .getByText("New scene sampled from Automatum distributions", { exact: true })
       .waitFor();
     const before = await page
       .getByRole("button", { name: /^Vehicle \d+$/ })
@@ -240,14 +190,14 @@ export async function browserChecks(base, { liveApi = false } = {}) {
       path: "test-results/behavior-simulator-mobile.png",
       fullPage: true,
     });
-    await page.goto(`${base}#/replay`);
-    await page.getByLabel("Held-out example", { exact: true }).waitFor();
+    await page.goto(`${base}#/simulator`);
+    await page.getByRole("heading", { name: "Highway simulator", exact: true }).waitFor();
     assert.equal(
       await page.locator("body").evaluate((e) => e.scrollWidth > innerWidth),
       false,
     );
     await page.screenshot({
-      path: "test-results/behavior-replay-mobile.png",
+      path: "test-results/behavior-simulator-mobile-final.png",
       fullPage: true,
     });
     assert.deepEqual(errors, []);
@@ -255,7 +205,7 @@ export async function browserChecks(base, { liveApi = false } = {}) {
     if (liveApi)
       assert.ok(batches > 0, "Actual behavior API must receive requests");
     console.log(
-      `PASS: 6 routes, repeated loads, ${replay.examples.length} frozen forecasts versus observed outcomes, recorded playback, empirical initialization, 4 lanes/12 cars, independent bypass, blocked lanes, 3 contacts/replays, 30 cars, mobile and task-schema protection. Actual/legacy batch responses: ${batches}.`,
+      `PASS: 5 routes, repeated loads, aggregate dataset initialization, 4 lanes/12 cars, independent bypass, blocked lanes, 3 contacts/replays, 30 cars, mobile and task-schema protection. Behavior API batch responses: ${batches}.`,
     );
   } finally {
     await browser.close();

@@ -22,8 +22,9 @@ async def lifespan(app):
     global load_error
     bundle.clear()
     try:
-        loaded={name:json.loads((ARTIFACTS/f'{name}.json').read_text(encoding='utf-8')) for name in ['info','metrics','analytics','replay']}
+        loaded={name:json.loads((ARTIFACTS/f'{name}.json').read_text(encoding='utf-8')) for name in ['info','metrics','analytics']}
         if any(value.get('task')!=TASK for value in loaded.values()): raise ValueError('Incompatible task artifacts')
+        if any(value.get('version')!='behavior-3' for value in loaded.values()): raise ValueError('Incompatible artifact version')
         loaded['model']=joblib.load(ARTIFACTS/'behavior.joblib')
         if list(loaded['model'].feature_names_in_)!=loaded['info']['features']: raise ValueError('Feature schema mismatch')
         bundle.update(loaded);load_error=None
@@ -31,7 +32,7 @@ async def lifespan(app):
         load_error=f'Behavior model unavailable ({type(exc).__name__}). Execute notebooks/NearMiss.ipynb.'
     yield
 
-app=FastAPI(title='NearMiss Lane-Change Behavior API',version='2.0.0',lifespan=lifespan)
+app=FastAPI(title='NearMiss Lane-Change Behavior API',version='3.0.0',lifespan=lifespan)
 app.add_middleware(CORSMiddleware,allow_origins=[v.strip() for v in os.getenv('CORS_ORIGINS','http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173').split(',') if v.strip()],allow_methods=['GET','POST'],allow_headers=['Content-Type'])
 
 @app.exception_handler(RequestValidationError)
@@ -44,16 +45,36 @@ def ready():
 
 class Observation(BaseModel):
     model_config=ConfigDict(extra='forbid',allow_inf_nan=False)
-    speed: float=Field(ge=0,le=55)
-    acceleration: float=Field(ge=-12,le=8)
+    speed: float=Field(ge=0,le=80)
+    acceleration: float=Field(ge=-20,le=15)
     lateral_speed: float=Field(ge=0,le=15)
     front_gap: float=Field(ge=0,le=150)
-    closing_speed: float=Field(ge=-55,le=55)
+    closing_speed: float=Field(ge=-65,le=65)
     has_leader: Literal[0,1]
+    left_front_gap: float=Field(ge=0,le=150)
+    left_front_closing_speed: float=Field(ge=-65,le=65)
+    left_front_present: Literal[0,1]
+    left_rear_gap: float=Field(ge=0,le=150)
+    left_rear_closing_speed: float=Field(ge=-65,le=65)
+    left_rear_present: Literal[0,1]
+    right_front_gap: float=Field(ge=0,le=150)
+    right_front_closing_speed: float=Field(ge=-65,le=65)
+    right_front_present: Literal[0,1]
+    right_rear_gap: float=Field(ge=0,le=150)
+    right_rear_closing_speed: float=Field(ge=-65,le=65)
+    right_rear_present: Literal[0,1]
+    is_truck: Literal[0,1]
 
     @model_validator(mode='after')
     def absence_encoding(self):
-        if not self.has_leader and (self.front_gap!=150 or self.closing_speed!=0): raise ValueError('Without an observed leader, encode front_gap=150 and closing_speed=0.')
+        neighbors=[('has_leader','front_gap','closing_speed'),
+            ('left_front_present','left_front_gap','left_front_closing_speed'),
+            ('left_rear_present','left_rear_gap','left_rear_closing_speed'),
+            ('right_front_present','right_front_gap','right_front_closing_speed'),
+            ('right_rear_present','right_rear_gap','right_rear_closing_speed')]
+        for present,gap,closing in neighbors:
+            if getattr(self,present)==0 and (getattr(self,gap)!=150 or getattr(self,closing)!=0):
+                raise ValueError(f'Without an observed neighbor, encode {gap}=150 and {closing}=0.')
         return self
 
 class Item(BaseModel):
@@ -90,9 +111,6 @@ def metrics(): return ready()['metrics']
 
 @app.get('/api/analytics')
 def analytics(): return ready()['analytics']
-
-@app.get('/api/replay')
-def replay(): return ready()['replay']
 
 @app.post('/api/predict')
 def predict(observation:Observation):

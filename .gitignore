@@ -12,3 +12,6 @@ frontend/dist/
 !.env.example
 frontend/playwright-report/
 frontend/test-results/
+
+/data/processed/*
+!/data/processed/.gitkeep
