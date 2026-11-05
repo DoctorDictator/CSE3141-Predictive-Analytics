@@ -1,50 +1,224 @@
 {
+  "task": "lane-change-behavior",
+  "version": "behavior-1",
   "name": "Logistic Regression",
-  "version": "nearmiss-1",
   "features": [
-    "follower_speed",
-    "leader_speed",
-    "follower_accel",
-    "leader_accel",
-    "spacing_m",
-    "leader_length"
+    "speed",
+    "acceleration",
+    "lateral_speed",
+    "front_gap",
+    "closing_speed",
+    "has_leader"
   ],
   "units": {
-    "follower_speed": "m/s",
-    "leader_speed": "m/s",
-    "follower_accel": "m/s\u00b2",
-    "leader_accel": "m/s\u00b2",
-    "spacing_m": "m front-to-front",
-    "leader_length": "m"
+    "speed": "m/s",
+    "acceleration": "m/s\u00b2",
+    "lateral_speed": "m/s; previous 0.5 s absolute mean",
+    "front_gap": "m; capped at 150",
+    "closing_speed": "m/s; ego minus leader",
+    "has_leader": "0 or 1"
   },
   "ranges": {
-    "follower_speed": [
-      0.509016,
-      27.343608
-    ],
-    "leader_speed": [
+    "speed": [
       0.0,
       29.04744
     ],
-    "follower_accel": [
+    "acceleration": [
       -3.41376,
       3.41376
     ],
-    "leader_accel": [
-      -3.41376,
-      3.41376
+    "lateral_speed": [
+      0.0,
+      3.9099743999999994
     ],
-    "spacing_m": [
-      3.2400240000000005,
-      149.92807200000001
+    "front_gap": [
+      0.07924800000000154,
+      150.0
     ],
-    "leader_length": [
-      1.8288000000000002,
-      23.19528
+    "closing_speed": [
+      -19.903440000000003,
+      18.379440000000002
+    ],
+    "has_leader": [
+      0.0,
+      1.0
     ]
   },
   "horizon_seconds": 2,
-  "headway_threshold_seconds": 1.5,
-  "target": "Any front-to-front headway below 1.5 s in next 20 complete 100 ms observations; same leader and lane",
-  "probability_note": "Uncalibrated close-following score; not collision probability"
+  "history_seconds": 0.5,
+  "labels": {
+    "0": "Stay in lane",
+    "1": "Lane change"
+  },
+  "target": "Any recorded adjacent mainline lane-ID crossing within the next complete 20 observations at 100 ms intervals",
+  "decision_threshold": 0.1,
+  "browser_model": {
+    "mean": [
+      12.60133752424392,
+      0.159581633099035,
+      0.16305436214919072,
+      23.80051457902888,
+      -0.3973790121347244,
+      0.9868441207005123
+    ],
+    "scale": [
+      4.015173300700051,
+      1.5620057099884181,
+      0.20256815214062948,
+      20.19229739463524,
+      1.6139219690834612,
+      0.11394209994266839
+    ],
+    "kind": "scaled-logit",
+    "coefficients": [
+      0.7683046411887378,
+      0.22459921609230643,
+      0.647991373204248,
+      -0.5979539222189869,
+      0.2110776546465762,
+      -0.43595699199152504
+    ],
+    "intercept": -5.024864645486933
+  },
+  "limitations": [
+    "Observed lane-ID crossing, not accident or feasibility prediction",
+    "Lateral motion can already be underway",
+    "One recording; evaluate independent recordings for external generalization",
+    "Probabilities are uncalibrated",
+    "Leader absence uses an explicit flag and capped gap encoding"
+  ],
+  "checks": [
+    {
+      "inputs": {
+        "speed": 10.83564,
+        "acceleration": 1.9232879999999999,
+        "lateral_speed": 0.1261872000000004,
+        "front_gap": 150.0,
+        "closing_speed": 0.0,
+        "has_leader": 0
+      },
+      "probability": 0.005844210102627574
+    },
+    {
+      "inputs": {
+        "speed": 10.853928,
+        "acceleration": -1.3929360000000002,
+        "lateral_speed": 0.08656319999999695,
+        "front_gap": 10.9728,
+        "closing_speed": -4.471416000000001,
+        "has_leader": 1
+      },
+      "probability": 0.0023986504285370253
+    },
+    {
+      "inputs": {
+        "speed": 11.713464,
+        "acceleration": 1.362456,
+        "lateral_speed": 0.08168640000000238,
+        "front_gap": 15.133320000000001,
+        "closing_speed": -3.410712,
+        "has_leader": 1
+      },
+      "probability": 0.004194152933134638
+    },
+    {
+      "inputs": {
+        "speed": 10.991088000000001,
+        "acceleration": -2.286,
+        "lateral_speed": 0.07863840000000621,
+        "front_gap": 17.992344000000003,
+        "closing_speed": -2.724912,
+        "has_leader": 1
+      },
+      "probability": 0.0021558388104018817
+    },
+    {
+      "inputs": {
+        "speed": 10.668000000000001,
+        "acceleration": 0.0,
+        "lateral_speed": 0.016459199999999896,
+        "front_gap": 20.967192000000004,
+        "closing_speed": -2.407919999999999,
+        "has_leader": 1
+      },
+      "probability": 0.002202233462719648
+    },
+    {
+      "inputs": {
+        "speed": 10.668000000000001,
+        "acceleration": 0.0,
+        "lateral_speed": 0.016459199999999896,
+        "front_gap": 23.183088,
+        "closing_speed": -1.822703999999998,
+        "has_leader": 1
+      },
+      "probability": 0.002226356526275089
+    },
+    {
+      "inputs": {
+        "speed": 9.537192000000001,
+        "acceleration": -1.399032,
+        "lateral_speed": 0.02438399999999774,
+        "front_gap": 24.740616000000003,
+        "closing_speed": -2.060447999999999,
+        "has_leader": 1
+      },
+      "probability": 0.0013934587213322177
+    },
+    {
+      "inputs": {
+        "speed": 10.006584,
+        "acceleration": 3.1120080000000003,
+        "lateral_speed": 0.13776960000000216,
+        "front_gap": 26.706576000000005,
+        "closing_speed": -1.840992,
+        "has_leader": 1
+      },
+      "probability": 0.004058298353044953
+    },
+    {
+      "inputs": {
+        "speed": 10.0584,
+        "acceleration": -3.081528,
+        "lateral_speed": 0.023164799999996433,
+        "front_gap": 28.047696,
+        "closing_speed": -1.0058399999999992,
+        "has_leader": 1
+      },
+      "probability": 0.001253366431222657
+    },
+    {
+      "inputs": {
+        "speed": 9.144,
+        "acceleration": 0.0,
+        "lateral_speed": 0.012801600000003077,
+        "front_gap": 28.992576000000003,
+        "closing_speed": -0.4907280000000007,
+        "has_leader": 1
+      },
+      "probability": 0.0016483823372955236
+    },
+    {
+      "inputs": {
+        "speed": 9.250680000000001,
+        "acceleration": 1.441704,
+        "lateral_speed": 0.01645920000000345,
+        "front_gap": 29.416248000000007,
+        "closing_speed": 0.08839200000000069,
+        "has_leader": 1
+      },
+      "probability": 0.0022295973934509383
+    },
+    {
+      "inputs": {
+        "speed": 9.619488,
+        "acceleration": -3.41376,
+        "lateral_speed": 0.386486399999999,
+        "front_gap": 28.285440000000005,
+        "closing_speed": 1.70688,
+        "has_leader": 1
+      },
+      "probability": 0.004954665870986863
+    }
+  ]
 }

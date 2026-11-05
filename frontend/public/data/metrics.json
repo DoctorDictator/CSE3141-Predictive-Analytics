@@ -1,152 +1,197 @@
 {
+  "task": "lane-change-behavior",
+  "version": "behavior-1",
   "selected_model": "Logistic Regression",
   "comparison": [
     {
       "name": "Logistic Regression",
-      "cv_f1": 0.904728155860671,
+      "cv_f1": 0.1256854256854257,
       "parameters": {
-        "model__C": 0.1
+        "model__C": 1,
+        "model__class_weight": null
       },
+      "threshold": 0.1,
       "training": {
-        "accuracy": 0.9477262115977215,
-        "precision": 0.9201502483945232,
-        "recall": 0.9111524386585877,
-        "f1": 0.9156292388847024,
-        "roc_auc": 0.9876773898253659,
+        "accuracy": 0.9781302653300883,
+        "precision": 0.27120315581854043,
+        "recall": 0.33495736906211937,
+        "f1": 0.2997275204359673,
+        "roc_auc": 0.8293303232497131,
+        "average_precision": 0.20503322284303618,
+        "balanced_accuracy": 0.6611009573838628,
         "confusion_matrix": [
           [
-            35558,
-            1318
+            57197,
+            739
           ],
           [
-            1481,
-            15188
+            546,
+            275
           ]
         ]
       },
       "validation": {
-        "accuracy": 0.9487967229902714,
-        "precision": 0.9278965688712083,
-        "recall": 0.9010140028971512,
-        "f1": 0.9142577168054875,
-        "roc_auc": 0.9877148002141826,
+        "accuracy": 0.9821440558501712,
+        "precision": 0.3435897435897436,
+        "recall": 0.32682926829268294,
+        "f1": 0.335,
+        "roc_auc": 0.8017766430046549,
+        "average_precision": 0.2243387455632761,
+        "balanced_accuracy": 0.6590585219764531,
         "confusion_matrix": [
           [
-            9239,
-            290
+            14564,
+            128
           ],
           [
-            410,
-            3732
+            138,
+            67
           ]
         ]
       }
     },
     {
       "name": "LDA",
-      "cv_f1": 0.7680541495031915,
+      "cv_f1": 0.19837645865043121,
       "parameters": {
-        "model__shrinkage": null
+        "model__priors": null,
+        "model__shrinkage": 0.1
       },
+      "threshold": 0.6,
       "training": {
-        "accuracy": 0.8799327668316369,
-        "precision": 0.8641018347319016,
-        "recall": 0.7289579458875758,
-        "f1": 0.7907975659757248,
-        "roc_auc": 0.9531383121820154,
+        "accuracy": 0.9777728611059108,
+        "precision": 0.26108374384236455,
+        "recall": 0.3227771010962241,
+        "f1": 0.2886710239651416,
+        "roc_auc": 0.8136204139407388,
+        "average_precision": 0.1807765527121136,
+        "balanced_accuracy": 0.6549158910617823,
         "confusion_matrix": [
           [
-            34965,
-            1911
+            57186,
+            750
           ],
           [
-            4518,
-            12151
+            556,
+            265
           ]
         ]
       },
       "validation": {
-        "accuracy": 0.8864750201155731,
-        "precision": 0.9126832377310389,
-        "recall": 0.6914534041525833,
-        "f1": 0.7868131868131868,
-        "roc_auc": 0.9595587365291518,
+        "accuracy": 0.9798617171242532,
+        "precision": 0.30612244897959184,
+        "recall": 0.36585365853658536,
+        "f1": 0.3333333333333333,
+        "roc_auc": 0.8030711918880691,
+        "average_precision": 0.20476083940310028,
+        "balanced_accuracy": 0.6771413677926597,
         "confusion_matrix": [
           [
-            9255,
-            274
+            14522,
+            170
           ],
           [
-            1278,
-            2864
+            130,
+            75
           ]
         ]
       }
     },
     {
       "name": "QDA",
-      "cv_f1": 0.7670298315914699,
+      "cv_f1": 0.191123418839658,
       "parameters": {
-        "model__reg_param": 0.01
+        "model__priors": null,
+        "model__reg_param": 0.2
       },
+      "threshold": 0.4,
       "training": {
-        "accuracy": 0.8999719861798487,
-        "precision": 0.7852927825692237,
-        "recall": 0.9340692303077569,
-        "f1": 0.853244191144235,
-        "roc_auc": 0.9714047103044363,
+        "accuracy": 0.96352774988512,
+        "precision": 0.1606776180698152,
+        "recall": 0.3812423873325213,
+        "f1": 0.2260743950884796,
+        "roc_auc": 0.8446711727098758,
+        "average_precision": 0.10461763946292058,
+        "balanced_accuracy": 0.6765107959860618,
         "confusion_matrix": [
           [
-            32619,
-            4257
+            56301,
+            1635
           ],
           [
-            1099,
-            15570
+            508,
+            313
           ]
         ]
       },
       "validation": {
-        "accuracy": 0.9022748884500037,
-        "precision": 0.7809371245494594,
-        "recall": 0.9415741187831965,
-        "f1": 0.8537653239929948,
-        "roc_auc": 0.9722494178866626,
+        "accuracy": 0.9675102369604618,
+        "precision": 0.1934065934065934,
+        "recall": 0.4292682926829268,
+        "f1": 0.26666666666666666,
+        "roc_auc": 0.824347247216006,
+        "average_precision": 0.11486491409310101,
+        "balanced_accuracy": 0.7021443559793615,
         "confusion_matrix": [
           [
-            8435,
-            1094
+            14325,
+            367
           ],
           [
-            242,
-            3900
+            117,
+            88
           ]
         ]
       }
     }
   ],
   "test": {
-    "accuracy": 0.961289892731028,
-    "precision": 0.9020785219399539,
-    "recall": 0.8410852713178295,
-    "f1": 0.8705148205928237,
-    "roc_auc": 0.9815324502547828,
+    "accuracy": 0.9878581560283688,
+    "precision": 0.22695035460992907,
+    "recall": 0.23357664233576642,
+    "f1": 0.2302158273381295,
+    "roc_auc": 0.8873312920309067,
+    "average_precision": 0.1645228354555062,
+    "balanced_accuracy": 0.6136718984780387,
     "confusion_matrix": [
       [
-        12475,
-        212
+        17379,
+        109
       ],
       [
-        369,
-        1953
+        105,
+        32
       ]
     ]
   },
-  "persistence_baseline_f1": 0.8275517843773397,
-  "split_sizes": {
-    "train": 53545,
-    "validation": 13671,
-    "test": 15009
+  "baseline": {
+    "name": "Always stay in lane",
+    "accuracy": 0.99222695035461,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "balanced_accuracy": 0.5,
+    "roc_auc": 0.5,
+    "average_precision": 0.007773049645390071
   },
-  "protocol": "Chronological 60/20/20; disjoint followers/leaders; 2 s embargo; purged training CV; validation F1 selection"
+  "split_sizes": {
+    "train": 58757,
+    "validation": 14897,
+    "test": 17625
+  },
+  "class_counts": {
+    "train": {
+      "0": 57936,
+      "1": 821
+    },
+    "validation": {
+      "0": 14692,
+      "1": 205
+    },
+    "test": {
+      "0": 17488,
+      "1": 137
+    }
+  },
+  "protocol": "Chronological 60/20/20; disjoint ego and current leader trajectories; full two-second outcome embargo; purged training CV; validation selection; once-only test"
 }

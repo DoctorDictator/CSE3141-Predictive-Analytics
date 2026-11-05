@@ -1,12 +1,17 @@
+"""Reproduce the single, self-contained analysis notebook; --execute runs every cell."""
 import json
 from pathlib import Path
+
 cells=[]
-def md(s): cells.append(dict(cell_type='markdown',metadata={},source=s))
-def code(s): cells.append(dict(cell_type='code',metadata={},source=s,outputs=[],execution_count=None))
-md('''# NearMiss — Traffic Analysis and Prediction
+def md(text): cells.append(dict(cell_type='markdown',metadata={},source=text))
+def code(text): cells.append(dict(cell_type='code',metadata={},source=text,outputs=[],execution_count=None))
+
+md('''# NearMiss — Lane-Change Behavior Prediction
 CSE3141 · Manipal University Jaipur
 
-Predict front-to-front time headway below 1.5 s at any observation in the next 2 s. This predicts close following, **not crashes**. Existing short headways can persist: this is event presence, not exclusively new onset. Compare Logistic Regression, LDA and QDA. No handout was attached; alignment follows the supplied syllabus list.''')
+**Question:** Will a recorded vehicle cross into an adjacent mainline lane during the next two seconds, or remain in its current lane?
+
+NGSIM measures actual driving trajectories at 0.1-second intervals. Our labels describe observed lane crossings, not accidents, safety, or whether a driver should change lanes. We compare Logistic Regression, LDA and QDA on exactly the same task. Two seconds is our chosen horizon, not a label supplied by DOT. No separate course handout was provided; algorithm alignment follows the supplied syllabus topics.''')
 code('''from pathlib import Path
 import json, hashlib, io
 import requests
@@ -20,15 +25,15 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis, QuadraticDiscriminantAnalysis
 from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, RocCurveDisplay
-ROOT = Path.cwd() if Path('backend').exists() else Path.cwd().parent
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, balanced_accuracy_score, average_precision_score, confusion_matrix, RocCurveDisplay, PrecisionRecallDisplay
+ROOT=Path.cwd() if Path('backend').exists() else Path.cwd().parent
 RAW=ROOT/'data/raw'; OUT=ROOT/'backend/artifacts'; PUBLIC=ROOT/'frontend/public/data'
 for p in [RAW,OUT,PUBLIC]: p.mkdir(parents=True,exist_ok=True)
 ORIGIN=1118846978900
 SOURCE='https://data.transportation.gov/resource/8ect-6jqj'
 sns.set_theme(style='whitegrid')''')
-md('''## 1. Genuine data and units
-https://data.transportation.gov/d/8ect-6jqj . DOT defines spacing/length in feet, velocity in ft/s, acceleration in ft/s², timestamp in ms. Spacing is **front-to-front**, not bumper gap. Retain one complete recording origin (global_time − frame_id × 100), preserving all 10 Hz frames. Three US-101 origins exist; use one here. Download pages ordered by vehicle/frame; export SHA-256.''')
+md('''## 1. Load genuine recorded trajectories
+Official source: https://data.transportation.gov/d/8ect-6jqj . FHWA documentation: https://www.fhwa.dot.gov/publications/research/operations/07030/index.cfm . Positions, length, spacing, speed and acceleration use feet-based units; timestamps use milliseconds. We use one complete recording origin, global_time − frame_id × 100. The full US-101 release contains three origins; results here concern one recording, not all 45 minutes. All frames are retained before future labels are constructed.''')
 code('''path=RAW/'us101_complete_recording.csv'
 columns='vehicle_id,frame_id,global_time,local_x,local_y,v_length,v_width,v_vel,v_acc,lane_id,preceding,following,space_headway,location'
 where=f"location='us-101' AND global_time-frame_id*100={ORIGIN}"
@@ -45,272 +50,215 @@ raw=pd.read_csv(path)
 assert raw.location.eq('us-101').all()
 assert (raw.global_time-raw.frame_id*100).eq(ORIGIN).all()
 r=requests.get(SOURCE+'.json',params={'$select':'count(*) as n','$where':where},timeout=120)
-r.raise_for_status()
-assert len(raw)==int(r.json()[0]['n'])
-# Vehicle class is constant per vehicle; join the official compact class lookup.
+r.raise_for_status(); assert len(raw)==int(r.json()[0]['n'])
 class_path=RAW/'us101_vehicle_classes.csv'
 if not class_path.exists():
     r=requests.get(SOURCE+'.csv',params={'$select':'vehicle_id,v_class','$where':where,'$group':'vehicle_id,v_class','$order':'vehicle_id','$limit':10000},timeout=120)
-    r.raise_for_status()
-    class_path.write_text(r.text,encoding='utf-8')
-classes=pd.read_csv(class_path)
-assert classes.vehicle_id.is_unique
+    r.raise_for_status(); class_path.write_text(r.text,encoding='utf-8')
+classes=pd.read_csv(class_path); assert classes.vehicle_id.is_unique
 raw=raw.merge(classes,on='vehicle_id',how='left',validate='many_to_one')
 assert raw.v_class.isin([1,2,3]).all()
 print('Rows/columns:',raw.shape,'Vehicles:',raw.vehicle_id.nunique())
 display(raw.head(),raw.dtypes)''')
-md('''## 2. Cleaning and same-time leader lookup
-Convert feet using 0.3048. Join preceding vehicles at the same timestamp and lane, requiring an ahead position. Exclude invalid/missing references. Inspect IQR outliers but retain genuine extremes inside documented physical limits. Enrich the cached trajectories with the official per-vehicle class lookup (1 motorcycle, 2 car, 3 truck).''')
+md('''## 2. Clean and convert units
+Remove duplicate keys and missing/invalid physical measurements. Convert feet to metres with exactly 0.3048. Keep mainline lanes 1–5, excluding ramps. Check IQR outliers without blindly deleting real braking or acceleration. A removed observation creates a gap, so any future label needing that observation will be censored.''')
 code('''print('Missing:',raw.isna().sum().to_dict())
-print('Duplicate keys:',raw.duplicated(['vehicle_id','global_time']).sum())
+duplicates=int(raw.duplicated(['vehicle_id','global_time']).sum()); print('Duplicate keys:',duplicates)
 df=raw.drop_duplicates(['vehicle_id','global_time']).copy()
 for c in ['local_x','local_y','v_length','v_width','v_vel','v_acc','space_headway']:
     df[c]=pd.to_numeric(df[c],errors='coerce')*.3048
 df=df.dropna()
-df=df[df.v_vel.between(0,55)&df.v_acc.between(-12,8)&df.v_length.between(1,25)&df.lane_id.between(1,5)]
-leaders=df[['vehicle_id','global_time','lane_id','v_vel','v_acc','v_length','local_y']].rename(columns={'vehicle_id':'preceding','lane_id':'leader_lane','v_vel':'leader_speed','v_acc':'leader_accel','v_length':'leader_length','local_y':'leader_y'})
-pairs=df.merge(leaders,on=['preceding','global_time'],how='inner',validate='many_to_one')
-pairs=pairs[(pairs.vehicle_id!=pairs.preceding)&pairs.lane_id.eq(pairs.leader_lane)&(pairs.leader_y>pairs.local_y)&(pairs.space_headway>pairs.leader_length)]
-pairs['headway']=pairs.space_headway/pairs.v_vel.replace(0,np.nan)
-pairs['gap']=pairs.space_headway-pairs.leader_length
-print('Valid pairs:',len(pairs))''')
-code('''display(df[['v_vel','v_acc','space_headway','v_length']].agg(['mean','median','var','std','min','max']).T)
-q1,q3=df.v_acc.quantile([.25,.75])
-print('Acceleration IQR outliers:',(~df.v_acc.between(q1-1.5*(q3-q1),q3+1.5*(q3-q1))).sum())''')
+df=df[df.v_vel.between(0,55)&df.v_acc.between(-12,8)&df.v_length.between(1,25)&df.v_width.between(.4,4)&df.lane_id.between(1,5)].copy()
+df=df.sort_values(['vehicle_id','global_time']).reset_index(drop=True)
+display(df[['v_vel','v_acc','v_length','space_headway']].agg(['mean','median','var','std','min','max']).T)
+q1,q3=df.v_acc.quantile([.25,.75]); print('Acceleration IQR outliers:',int((~df.v_acc.between(q1-1.5*(q3-q1),q3+1.5*(q3-q1))).sum()))''')
+md('''## 3. Current measurements and past motion only
+Match the reported preceding vehicle at the same timestamp and lane. DOT spacing is front-to-front; subtract leader length for bumper gap. Invalid references are excluded, while a reported preceding ID of zero is retained with a separate `has_leader` flag. Its gap is encoded as 150 m and closing speed as zero; 150 m is an encoding cap, not a measured absence distance.
+
+The six model features are speed, acceleration, absolute average lateral speed over the **previous** 0.5 s, capped front bumper gap, closing speed, and observed-leader presence. Absolute lateral motion avoids treating left/right movement as canceling signs. It can reveal a maneuver already underway; predicting the later lane-ID crossing is not the same as inferring hidden intention before lateral motion starts. Adjacent-lane feasibility is not this model's target.''')
+code('''past=df.groupby('vehicle_id')[['global_time','local_x']].shift(5)
+df['lateral_speed']=(df.local_x-past.local_x).abs()/.5
+df.loc[~df.global_time.sub(past.global_time).eq(500),'lateral_speed']=np.nan
+leaders=df[['vehicle_id','global_time','lane_id','v_vel','v_length','local_y']].rename(columns={'vehicle_id':'preceding','lane_id':'leader_lane','v_vel':'leader_speed','v_length':'leader_length','local_y':'leader_y'})
+observed=df.merge(leaders,on=['preceding','global_time'],how='left',validate='many_to_one')
+has=observed.preceding.ne(0)
+valid_leader=(~has)|(observed.leader_lane.eq(observed.lane_id)&(observed.leader_y>observed.local_y)&(observed.space_headway>observed.leader_length))
+observed['has_leader']=has.astype(int)
+observed['front_gap']=np.where(has,(observed.space_headway-observed.leader_length).clip(0,150),150)
+observed['closing_speed']=np.where(has,observed.v_vel-observed.leader_speed,0)
+observed['speed']=observed.v_vel; observed['acceleration']=observed.v_acc
+observed['headway']=np.where(has,observed.space_headway/observed.v_vel.replace(0,np.nan),np.nan)
+features=['speed','acceleration','lateral_speed','front_gap','closing_speed','has_leader']
+print('Invalid preceding references:',int((~valid_leader).sum()))''')
 code('''fig,axes=plt.subplots(2,3,figsize=(14,7))
-for ax,c,title in zip(axes.flat,['v_vel','v_acc','gap','headway','lane_id','v_class'],['Speed (m/s)','Acceleration (m/s²)','Bumper gap (m)','Front headway (s)','Lane','Vehicle type (1 motorcycle, 2 car, 3 truck)']):
-    values=pairs[c].replace([np.inf,-np.inf],np.nan).dropna()
+for ax,c,title in zip(axes.flat,['v_vel','v_acc','front_gap','headway','lane_id','v_class'],['Speed (m/s)','Acceleration (m/s²)','Capped front bumper gap (m)','Front time headway (s; below 10)','Lane occupancy','Vehicle type: 1 motorcycle, 2 car, 3 truck']):
+    values=observed.loc[valid_leader,c].replace([np.inf,-np.inf],np.nan).dropna()
     if c=='headway': values=values[values<10]
     if c in ['lane_id','v_class']:
         counts=values.value_counts().sort_index(); ax.bar(counts.index,counts.values,color='#208777')
-    else: ax.hist(values,bins=35,color='#208777')
+    else: ax.hist(values,bins=30,color='#208777')
     ax.set_title(title)
 plt.tight_layout(); plt.show()''')
-code('''sample=pairs.sample(min(5000,len(pairs)),random_state=42)
-fig,axes=plt.subplots(1,2,figsize=(13,4))
-axes[0].scatter(sample.v_vel,sample.gap,s=3,alpha=.2); axes[0].set(xlabel='Speed (m/s)',ylabel='Bumper gap (m)')
-sns.heatmap(sample[['v_vel','v_acc','leader_speed','leader_accel','gap','headway']].corr(),annot=True,fmt='.2f',ax=axes[1],cmap='BrBG',center=0)
-plt.tight_layout(); plt.show()''')
-md('''## 3. Future target
-Require all 20 subsequent 100 ms observations with the same valid leader/lane. Label 1 if any future front-spacing/follower-speed <1.5 s. Missing frames, stopped followers (<0.5 m/s), changed leader/lane and truncated windows are ineligible.
-
-1.5 s is an experimental surrogate, not a universal boundary. Context-dependent headway thresholds and the distinction from TTC: https://doi.org/10.1016/S0001-4575(02)00022-2 . Inspect threshold sensitivity below.''')
-code('''pairs=pairs.sort_values(['vehicle_id','global_time']).reset_index(drop=True)
-group=pairs.groupby('vehicle_id',sort=False)
-future_headways=[]
-valid=pairs.v_vel.ge(.5)&np.isfinite(pairs.headway)
+md('''## 4. Labels from actual future lane IDs
+At every current observation, require all 20 subsequent frames at exactly 100 ms intervals, in mainline lanes, with no jump larger than one lane between successive frames. Label **1** if an adjacent crossing occurs anywhere in this complete window; otherwise label **0**. A return to the original lane still counts as a change. Missing/truncated windows are excluded even if an early change was seen. No accident, headway or gap threshold determines the label. The following code labels all 10 Hz observations before thinning to 1 Hz.''')
+code('''future_group=df.groupby('vehicle_id',sort=False)
+complete=pd.Series(True,index=df.index)
+changed=pd.Series(False,index=df.index)
+previous_lane=df.lane_id
 for step in range(1,21):
-    future=group[['global_time','preceding','lane_id','headway','v_vel']].shift(-step)
-    valid &= future.global_time.eq(pairs.global_time+step*100)&future.preceding.eq(pairs.preceding)&future.lane_id.eq(pairs.lane_id)&future.v_vel.ge(.5)&np.isfinite(future.headway)
-    future_headways.append(future.headway)
-future_min=pd.concat(future_headways,axis=1).min(axis=1)
-pairs['target']=(future_min<1.5).astype(int)
-pairs['future_min']=future_min
-eligible=pairs[valid].copy()
-print('Eligible:',len(eligible),'Classes:',eligible.target.value_counts().to_dict())
-print('Threshold sensitivity:',{t:float((eligible.future_min<t).mean()) for t in [1,1.5,2]})
+    future=future_group[['global_time','lane_id']].shift(-step)
+    difference=(future.lane_id-previous_lane).abs()
+    complete &= future.global_time.eq(df.global_time+100*step)&future.lane_id.between(1,5)&difference.le(1)
+    changed |= difference.eq(1)
+    previous_lane=future.lane_id
+df['target']=changed.astype(int)
+eligible=observed[complete.to_numpy()&valid_leader.to_numpy()&observed[features].notna().all(axis=1).to_numpy()].copy()
+eligible['target']=df.loc[eligible.index,'target']
+previous=df.groupby('vehicle_id')[['global_time','lane_id']].shift()
+transition_mask=df.global_time.sub(previous.global_time).eq(100)&df.lane_id.sub(previous.lane_id).abs().eq(1)
+transition_count=int(transition_mask.sum())
+print('Observed crossings:',transition_count,'Eligible 10 Hz windows:',len(eligible))
+print('Future-window classes:',eligible.target.value_counts().to_dict())
 assert set(eligible.target.unique())=={0,1}''')
-md('''## 4. Current features and isolated splits
-Use current follower/leader speed and acceleration, front spacing and leader length. Omit redundant derived features for QDA covariance stability. No future values or lane IDs enter X.
-
-Chronological 60/20/20 blocks. Exclude both followers and leaders whose complete trajectory crosses any boundary; add a 2 s outcome embargo. Thin to 1 Hz only after 10 Hz labeling.''')
-code('''features=['follower_speed','leader_speed','follower_accel','leader_accel','spacing_m','leader_length']
-eligible=eligible.rename(columns={'v_vel':'follower_speed','v_acc':'follower_accel','space_headway':'spacing_m'})
-start,end=df.global_time.min(),df.global_time.max()
+code('''fig,axes=plt.subplots(1,2,figsize=(12,4))
+counts=eligible.target.value_counts().reindex([0,1],fill_value=0)
+axes[0].bar(['Stayed in lane','Crossed a lane'],counts.values,color=['#8ca590','#208777']); axes[0].set_title('Complete future windows: not crash outcomes')
+sample=eligible.sample(min(5000,len(eligible)),random_state=42)
+sns.heatmap(sample[features+['target']].corr(),annot=True,fmt='.2f',cmap='BrBG',center=0,ax=axes[1]); plt.tight_layout(); plt.show()
+print('Positive windows can overlap around one actual crossing; window counts are not unique maneuver counts.')''')
+md('''## 5. Isolated chronological partitions
+Use chronological 60/20/20 blocks. Exclude vehicles whose complete raw trajectory crosses a boundary, for both the ego and any current leader. No vehicle ID is shared across partitions. Require the full two-second outcome inside the partition. Thin current samples to 1 Hz only after label construction. The test set is not used for tuning or selection.''')
+code('''start,end=raw.global_time.min(),raw.global_time.max()
 cut1,cut2=start+.6*(end-start),start+.8*(end-start)
-bounds=df.groupby('vehicle_id').global_time.agg(['min','max'])
+bounds=raw.groupby('vehicle_id').global_time.agg(['min','max'])
 parts=[]
 for low,high in [(start,cut1),(cut1,cut2),(cut2,end+1)]:
     ids=bounds.index[(bounds['min']>=low)&(bounds['max']<high)]
-    parts.append(eligible[eligible.vehicle_id.isin(ids)&eligible.preceding.isin(ids)&(eligible.global_time>=low)&(eligible.global_time+2000<high)&(eligible.frame_id%10==0)].copy())
+    part=eligible[eligible.vehicle_id.isin(ids)&(eligible.preceding.eq(0)|eligible.preceding.isin(ids))&(eligible.global_time>=low)&(eligible.global_time+2000<high)&(eligible.frame_id%10==0)].copy()
+    parts.append(part)
 train,validation,test=parts
 for name,p in zip(['train','validation','test'],parts): print(name,len(p),p.target.value_counts().to_dict())
 for a,b in [(train,validation),(train,test),(validation,test)]:
-    assert not (set(a.vehicle_id)|set(a.preceding)) & (set(b.vehicle_id)|set(b.preceding))
-X,y=train[features],train.target
-assert all(p.target.nunique()==2 for p in parts)''')
-md('''## 5. Comparable tuning
-Same features, scaling, partitions and folds for all models. Purged expanding chronological CV inside training removes shared vehicles and includes a 2 s embargo. Scaling fits within folds. Validation F1 selects the tuned model; test stays untouched.''')
+    assert not (set(a.vehicle_id)|set(a.preceding)-{0})&(set(b.vehicle_id)|set(b.preceding)-{0})
+assert all(p.target.nunique()==2 for p in parts)
+X,y=train[features],train.target''')
+md('''## 6. Training-only preprocessing and tuning
+All three classifiers receive identical features and partitions. Expanding training folds purge vehicles shared across fold sides, including current leaders, and embargo future windows. Scaling is fitted within each fold. Compare ordinary and balanced priors/weights because lane changes are rare. Validation F1 selects the model, with average precision then ROC-AUC breaking ties. Accuracy alone can be misleading when almost everyone stays in lane.''')
 code('''folds=[]
 for fraction in [.5,.7,.85]:
     boundary=train.global_time.quantile(fraction)
-    left=train[train.global_time+2000<boundary]
-    right=train[(train.global_time>boundary)&(train.global_time<=boundary+.14*(cut1-start))]
-    shared=(set(left.vehicle_id)|set(left.preceding)) & (set(right.vehicle_id)|set(right.preceding))
-    left=left[~left.vehicle_id.isin(shared)&~left.preceding.isin(shared)]
-    right=right[~right.vehicle_id.isin(shared)&~right.preceding.isin(shared)]
-    if left.target.nunique()==2 and right.target.nunique()==2:
-        folds.append((np.flatnonzero(train.index.isin(left.index)),np.flatnonzero(train.index.isin(right.index))))
+    a=train[train.global_time+2000<boundary]
+    b=train[(train.global_time>boundary)&(train.global_time<boundary+.14*(cut1-start))]
+    shared=((set(a.vehicle_id)|set(a.preceding))&(set(b.vehicle_id)|set(b.preceding)))-{0}
+    a=a[~a.vehicle_id.isin(shared)&~a.preceding.isin(shared)]
+    b=b[~b.vehicle_id.isin(shared)&~b.preceding.isin(shared)]
+    if a.target.nunique()==2 and b.target.nunique()==2: folds.append((np.flatnonzero(train.index.isin(a.index)),np.flatnonzero(train.index.isin(b.index))))
 assert len(folds)>=2
-print('CV fold sizes:',[(len(a),len(b)) for a,b in folds])
-def evaluate(model,part):
-    pred=model.predict(part[features]); prob=model.predict_proba(part[features])[:,1]
-    return dict(accuracy=accuracy_score(part.target,pred),precision=precision_score(part.target,pred,zero_division=0),recall=recall_score(part.target,pred,zero_division=0),f1=f1_score(part.target,pred,zero_division=0),roc_auc=roc_auc_score(part.target,prob),confusion_matrix=confusion_matrix(part.target,pred).tolist())
-models={}; results=[]''')
-for name,model,grid in [('Logistic Regression','LogisticRegression(max_iter=2000,random_state=42)',"{'model__C':[.1,1,10]}"),('LDA',"LinearDiscriminantAnalysis(solver='lsqr')","{'model__shrinkage':[None,'auto',.1]}"),('QDA','QuadraticDiscriminantAnalysis()',"{'model__reg_param':[.01,.1,.5]}")]:
-    code(f'''search=GridSearchCV(Pipeline([('scale',StandardScaler()),('model',{model})]),{grid},cv=folds,scoring='f1',n_jobs=1)
+print('Purged CV sizes:',[(len(a),len(b)) for a,b in folds])
+def evaluate(model,part,threshold=.5):
+    prob=model.predict_proba(part[features])[:,1]; pred=(prob>=threshold).astype(int)
+    return dict(accuracy=accuracy_score(part.target,pred),precision=precision_score(part.target,pred,zero_division=0),recall=recall_score(part.target,pred,zero_division=0),f1=f1_score(part.target,pred,zero_division=0),roc_auc=roc_auc_score(part.target,prob),average_precision=average_precision_score(part.target,prob),balanced_accuracy=balanced_accuracy_score(part.target,pred),confusion_matrix=confusion_matrix(part.target,pred).tolist())
+models={}; results=[]
+print('After training-only grid search, each candidate threshold is selected on validation from a fixed grid; test is untouched.')''')
+for name,model,grid in [('Logistic Regression','LogisticRegression(max_iter=2000,random_state=42)',"{'model__C':[.1,1,10],'model__class_weight':[None,'balanced']}"),('LDA',"LinearDiscriminantAnalysis(solver='lsqr')","{'model__shrinkage':['auto',.1],'model__priors':[None,[.5,.5]]}"),('QDA','QuadraticDiscriminantAnalysis()',"{'model__reg_param':[.05,.2,.5],'model__priors':[None,[.5,.5]]}")]:
+    code(f'''search=GridSearchCV(Pipeline([('scale',StandardScaler()),('model',{model})]),{grid},cv=folds,scoring='f1',n_jobs=1,error_score='raise')
 search.fit(X,y)
 models['{name}']=search.best_estimator_
-results.append(dict(name='{name}',cv_f1=search.best_score_,parameters=search.best_params_,training=evaluate(search.best_estimator_,train),validation=evaluate(search.best_estimator_,validation)))
+threshold=max([.05,.1,.15,.2,.3,.4,.5,.6,.7,.8,.9],key=lambda t:(evaluate(search.best_estimator_,validation,t)['f1'],evaluate(search.best_estimator_,validation,t)['precision'],t))
+results.append(dict(name='{name}',cv_f1=search.best_score_,parameters=search.best_params_,threshold=threshold,training=evaluate(search.best_estimator_,train,threshold),validation=evaluate(search.best_estimator_,validation,threshold)))
 print(results[-1])''')
 code('''comparison=pd.DataFrame([dict(model=r['name'],cv_f1=r['cv_f1'],train_f1=r['training']['f1'],**{k:v for k,v in r['validation'].items() if k!='confusion_matrix'}) for r in results])
 display(comparison)
-comparison.set_index('model')[['train_f1','f1','roc_auc']].plot.bar(ylim=(0,1),figsize=(9,4)); plt.title('Training versus validation'); plt.tight_layout(); plt.show()
-print('Large gaps suggest overfitting or temporal shift; close scores do not prove generalization.')''')
+comparison.set_index('model')[['train_f1','f1','average_precision']].plot.bar(ylim=(0,1),figsize=(10,4)); plt.title('Training versus validation'); plt.tight_layout(); plt.show()
+print('Large gaps suggest overfitting or distribution shift. Close scores do not establish external generalization.')''')
 code('''fig,axes=plt.subplots(1,3,figsize=(12,3))
 for ax,r in zip(axes,results):
-    sns.heatmap(r['validation']['confusion_matrix'],annot=True,fmt='d',cbar=False,ax=ax); ax.set(title=r['name'],xlabel='Predicted',ylabel='Observed')
+    sns.heatmap(r['validation']['confusion_matrix'],annot=True,fmt='d',cbar=False,ax=ax); ax.set(title=r['name'],xlabel='Predicted: stay / change',ylabel='Observed: stay / change')
 plt.tight_layout(); plt.show()
-for name,model in models.items(): RocCurveDisplay.from_estimator(model,validation[features],validation.target,ax=plt.gca(),name=name)
-plt.title('Validation ROC'); plt.show()''')
-md('''## 6. Select then test once
-Select validation F1, ROC-AUC breaks ties. Keep the training-fitted pipeline without refitting on validation, so the exported model equals the tested model. These uncalibrated probabilities do not establish generalization to other roads or arbitrary simulated behavior.''')
-code('''winner=max(results,key=lambda r:(r['validation']['f1'],r['validation']['roc_auc']))
+fig,axes=plt.subplots(1,2,figsize=(12,4))
+for name,model in models.items():
+    RocCurveDisplay.from_estimator(model,validation[features],validation.target,ax=axes[0],name=name)
+    PrecisionRecallDisplay.from_estimator(model,validation[features],validation.target,ax=axes[1],name=name)
+axes[1].axhline(validation.target.mean(),linestyle='--',color='gray',label='Positive prevalence'); plt.tight_layout(); plt.show()''')
+md('''## 7. Select, then evaluate once on untouched test data
+Select by validation F1, then average precision and ROC-AUC. Retain the training-fitted pipeline without refitting on validation, so the export is exactly the tested model. Compare with the simple rule that every car stays in its lane. Its accuracy can be very high while its lane-change recall and F1 are zero. Report uncalibrated scores as estimated behavior probabilities, never accident probabilities or safety recommendations.''')
+code('''winner=max(results,key=lambda r:(r['validation']['f1'],r['validation']['average_precision'],r['validation']['roc_auc']))
 selected=models[winner['name']]
-test_metrics=evaluate(selected,test)
-print('Selected:',winner['name']); print('Untouched test:',test_metrics)
-baseline=(test.spacing_m/test.follower_speed<1.5).astype(int)
-print('Current-headway persistence baseline F1:',f1_score(test.target,baseline))''')
+test_metrics=evaluate(selected,test,winner['threshold'])
+baseline=dict(name='Always stay in lane',accuracy=float((test.target==0).mean()),precision=0.,recall=0.,f1=0.,balanced_accuracy=.5,roc_auc=.5,average_precision=float(test.target.mean()))
+print('Selected:',winner['name']); print('Untouched test:',test_metrics); print('Baseline:',baseline)
+test_probability=selected.predict_proba(test[features])[:,1]
+test_prediction=(test_probability>=winner['threshold']).astype(int)''')
 code('''fig,axes=plt.subplots(2,3,figsize=(12,6))
 for ax,feature in zip(axes.flat,features):
     grid=pd.DataFrame([X.median()]*60)
     grid[feature]=np.linspace(X[feature].quantile(.01),X[feature].quantile(.99),60)
-    ax.plot(grid[feature],selected.predict_proba(grid)[:,1],color='#208777'); ax.set(title=feature,ylabel='Estimated probability',ylim=(0,1))
+    if feature=='has_leader': grid[feature]=(grid[feature]>.5).astype(int)
+    ax.plot(grid[feature],selected.predict_proba(grid)[:,1],color='#208777'); ax.set(title=feature,ylabel='Lane-change score',ylim=(0,1))
 plt.tight_layout(); plt.show()
-print('Response curves are not causal; correlated inputs can make combinations atypical.')''')
-md('''## 7. Export
-Export fitted preprocessing/model, schema, units, ranges and real EDA/metrics. Reject runtime inputs outside training support. Same-lane predictions do not apply to lane-change collision risk.''')
-code('''info=dict(name=winner['name'],version='nearmiss-1',features=features,units=dict(follower_speed='m/s',leader_speed='m/s',follower_accel='m/s²',leader_accel='m/s²',spacing_m='m front-to-front',leader_length='m'),ranges={c:[float(X[c].min()),float(X[c].max())] for c in features},horizon_seconds=2,headway_threshold_seconds=1.5,target='Any front-to-front headway below 1.5 s in next 20 complete 100 ms observations; same leader and lane',probability_note='Uncalibrated close-following score; not collision probability')
-metrics=dict(selected_model=winner['name'],comparison=results,test=test_metrics,persistence_baseline_f1=float(f1_score(test.target,baseline)),split_sizes={n:len(p) for n,p in zip(['train','validation','test'],parts)},protocol='Chronological 60/20/20; disjoint followers/leaders; 2 s embargo; purged training CV; validation F1 selection')
-def histogram(values,bins=20):
-    if values.name in ['lane_id','v_class']:
+print('Response curves describe fitted associations, not causal effects or hidden driver intention.')''')
+md('''## 8. Export the exact model, schema and metrics
+Portable parameters reproduce the selected fitted scaler and classifier in the browser. QDA exports its fitted class means, rotations, variances and priors; linear models export their fitted coefficients. This is local inference using the same learned model, not a hand-designed percentage. Export held-out probability checks to verify numerical equivalence. Runtime inputs outside training support receive no score.''')
+code('''scale=selected.named_steps['scale']; classifier=selected.named_steps['model']
+portable=dict(mean=scale.mean_.tolist(),scale=scale.scale_.tolist())
+if winner['name']=='QDA':
+    portable.update(kind='scaled-qda',means=classifier.means_.tolist(),rotations=[r.tolist() for r in classifier.rotations_],variances=[s.tolist() for s in classifier.scalings_],priors=classifier.priors_.tolist())
+else: portable.update(kind='scaled-logit',coefficients=classifier.coef_[0].tolist(),intercept=float(classifier.intercept_[0]))
+info=dict(task='lane-change-behavior',version='behavior-1',name=winner['name'],features=features,units=dict(speed='m/s',acceleration='m/s²',lateral_speed='m/s; previous 0.5 s absolute mean',front_gap='m; capped at 150',closing_speed='m/s; ego minus leader',has_leader='0 or 1'),ranges={c:[float(X[c].min()),float(X[c].max())] for c in features},horizon_seconds=2,history_seconds=.5,labels={'0':'Stay in lane','1':'Lane change'},target='Any recorded adjacent mainline lane-ID crossing within the next complete 20 observations at 100 ms intervals',decision_threshold=float(winner['threshold']),browser_model=portable,limitations=['Observed lane-ID crossing, not accident or feasibility prediction','Lateral motion can already be underway','One recording; evaluate independent recordings for external generalization','Probabilities are uncalibrated','Leader absence uses an explicit flag and capped gap encoding'])
+supported=test[test[features].ge(X.min()).all(axis=1)&test[features].le(X.max()).all(axis=1)]
+info['checks']=[dict(inputs=row[features].to_dict(),probability=float(selected.predict_proba(pd.DataFrame([row[features]]))[0,1])) for _,row in supported.head(12).iterrows()]
+metrics=dict(task=info['task'],version=info['version'],selected_model=winner['name'],comparison=results,test=test_metrics,baseline=baseline,split_sizes={n:len(p) for n,p in zip(['train','validation','test'],parts)},class_counts={n:{str(k):int(v) for k,v in p.target.value_counts().items()} for n,p in zip(['train','validation','test'],parts)},protocol='Chronological 60/20/20; disjoint ego and current leader trajectories; full two-second outcome embargo; purged training CV; validation selection; once-only test')
+joblib.dump(selected,OUT/'behavior.joblib')
+for name,value in [('info',info),('metrics',metrics)]:
+    for folder in [OUT,PUBLIC]: (folder/f'{name}.json').write_text(json.dumps(value,indent=2,allow_nan=False),encoding='utf-8')
+(OUT/'example.json').write_text(json.dumps(info['checks'][0]['inputs'],indent=2))
+assert np.allclose(joblib.load(OUT/'behavior.joblib').predict_proba(test[features])[:,1],test_probability)
+print('Exported fitted behavior model:',winner['name'])''')
+md('''## 9. Replay held-out recorded outcomes
+Examples cover correct and incorrect stay/change predictions where available, with different ego vehicles. A score is computed from the assessment-time inputs only and frozen while actual future positions replay. The actual outcome is revealed at the end. The sample is illustrative, not a representative estimate of accuracy; use full test metrics for performance. Traces and nearby vehicles are recorded samples, not model-controlled animations.''')
+code('''lookup=df.set_index(['vehicle_id','global_time'])
+frames={int(t):f for t,f in df.groupby('global_time')}
+candidate=test.copy(); candidate['probability']=test_probability; candidate['predicted']=test_prediction
+examples=[]; used=set()
+for actual,predicted in [(1,1),(1,0),(0,1),(0,0)]:
+    for _,row in candidate[(candidate.target==actual)&(candidate.predicted==predicted)].iterrows():
+        if int(row.vehicle_id) in used: continue
+        current=int(row.global_time); vehicle_id=int(row.vehicle_id)
+        scene=frames[current]
+        ids=scene.assign(distance=(scene.local_y-row.local_y).abs()).sort_values('distance').head(10).vehicle_id.astype(int).tolist()
+        snapshots=[]
+        for step in range(21):
+            instant=current+step*100; f=frames[instant]; f=f[f.vehicle_id.isin(ids)]
+            snapshots.append(dict(seconds=step/10,cars=[dict(id=int(v.vehicle_id),x=float(v.local_y-row.local_y+30),y=float(v.local_x),lane=int(v.lane_id),speed=float(v.v_vel),length=float(v.v_length),width=float(v.v_width)) for v in f.itertuples()]))
+        examples.append(dict(id=len(examples)+1,vehicle_id=vehicle_id,timestamp=current,initial_lane=int(row.lane_id),actual=int(actual),predicted=int(predicted),probability=float(row.probability),inputs=row[features].to_dict(),supported=bool(row[features].ge(X.min()).all() and row[features].le(X.max()).all()),snapshots=snapshots))
+        used.add(vehicle_id)
+        if sum(e['actual']==actual and e['predicted']==predicted for e in examples)>=4: break
+replay=dict(task=info['task'],version=info['version'],horizon_seconds=2,source='Held-out NGSIM observations; ten nearby vehicles per scene',examples=examples)
+for folder in [OUT,PUBLIC]: (folder/'replay.json').write_text(json.dumps(replay,indent=2,allow_nan=False),encoding='utf-8')
+print('Held-out replay examples:',len(examples))''')
+md('''## 10. Traffic distributions and data-informed simulation initialization
+EDA uses real observations. For generated scenes, export coherent **training-period snapshots** containing real combinations of speeds, accelerations, lengths and lanes. A configurable simulator can remap lane indices and separate overlaps after remapping; those scenes are adaptations, not historical replays or guaranteed exact reproductions of the original distributions. Distinguish these from the held-out replay and from deliberately constructed collision demonstrations.''')
+code('''def histogram(values,bins=20):
+    values=values.replace([np.inf,-np.inf],np.nan).dropna()
+    if values.name in ['lane_id','v_class','target']:
         return [dict(value=int(v),count=int(n)) for v,n in values.value_counts().sort_index().items()]
     counts,edges=np.histogram(values,bins=bins)
     return [dict(value=float((a+b)/2),count=int(n)) for a,b,n in zip(edges[:-1],edges[1:],counts)]
-analytics=dict(rows=len(raw),vehicles=int(raw.vehicle_id.nunique()),recording_count=1,source_recording_count=3,duration_seconds=float((end-start)/1000),eligible_rows=len(eligible),positive_rate=float(eligible.target.mean()),missing_values=raw.isna().sum().to_dict(),source=SOURCE,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),class_sha256=hashlib.sha256(class_path.read_bytes()).hexdigest(),vehicle_types=raw.drop_duplicates('vehicle_id').v_class.value_counts().to_dict(),threshold_sensitivity={str(t):float((eligible.future_min<t).mean()) for t in [1,1.5,2]},histograms={c:histogram(pairs[c].dropna().clip(upper=10) if c=='headway' else pairs[c].dropna()) for c in ['v_vel','v_acc','gap','headway','lane_id','v_class']},correlation=sample[['v_vel','v_acc','leader_speed','leader_accel','gap','headway']].corr().round(3).to_dict(),speed_gap=sample[['v_vel','gap']].head(500).rename(columns={'v_vel':'speed'}).to_dict('records'),statistics=df[['v_vel','v_acc','space_headway','v_length']].describe().to_dict())
-joblib.dump(selected,OUT/'nearmiss.joblib')
-for name,value in [('info',info),('metrics',metrics),('analytics',analytics)]:
-    for folder in [OUT,PUBLIC]: (folder/f'{name}.json').write_text(json.dumps(value,indent=2,allow_nan=False),encoding='utf-8')
-(OUT/'example.json').write_text(json.dumps(test[features].iloc[0].to_dict(),indent=2))
-print('Exported:',OUT)''')
-md('''## 8. Can this dataset support lane-change decisions?
-Yes, for observed maneuvers and clearly defined conflict proxies. DOT records positions every 0.1 s, with lane IDs and surrounding traffic. The full release spans three recording periods; this notebook uses one complete period. It contains **no verified accident labels**. A simulated accident/blocked six-lane road is an illustrative scenario, not a replayed NGSIM accident.
-
-We now extract actual adjacent mainline lane transitions. Assess each maneuver one second before its lane-ID crossing, using only then-current target-lane front/rear bumper gaps and three speeds. The driver may already be moving laterally at this point: this is a pre-crossing assessment, not proof of a decision made before maneuver initiation. Predict whether front or rear front-to-front headway falls below 1.5 s, or either bumper gap below 2 m, during the first second after crossing. This is an observed **close-conflict proxy**, not crash probability or a causal guarantee about an unattempted maneuver. Empty target lanes are handled by explicit simulation geometry rather than invented ML inputs.''')
-code('''# Actual lane transitions, not random labels or generated crashes.
-tracks=df.sort_values(['vehicle_id','global_time']).copy()
-previous=tracks.groupby('vehicle_id')[['lane_id','global_time']].shift()
-transitions=tracks[(tracks.lane_id-previous.lane_id).abs().eq(1)&tracks.global_time.sub(previous.global_time).eq(100)].copy()
-transitions['from_lane']=previous.lane_id.loc[transitions.index]
-lookup=tracks.set_index(['vehicle_id','global_time'])
-frames={int(t):f for t,f in tracks.groupby('global_time')}
-lane_rows=[]; lane_examples=[]
-for move in transitions.itertuples():
-    crossing=int(move.global_time); decision=crossing-1000; target_lane=int(move.lane_id)
-    times=np.arange(decision,crossing+1001,100)
-    ego=lookup.reindex(pd.MultiIndex.from_product([[move.vehicle_id],times],names=lookup.index.names))
-    if ego.local_y.isna().any() or not ego.lane_id.iloc[:10].eq(move.from_lane).all() or not ego.lane_id.iloc[10:].eq(target_lane).all(): continue
-    current=ego.iloc[0]
-    nearby=frames[decision]
-    nearby=nearby[(nearby.lane_id==target_lane)&(nearby.vehicle_id!=move.vehicle_id)]
-    front=nearby[nearby.local_y>current.local_y].sort_values('local_y').head(1)
-    rear=nearby[nearby.local_y<=current.local_y].sort_values('local_y',ascending=False).head(1)
-    if front.empty or rear.empty: continue
-    front=front.iloc[0]; rear=rear.iloc[0]
-    fg=front.local_y-front.v_length-current.local_y
-    rg=current.local_y-current.v_length-rear.local_y
-    if min(fg,rg)<=0: continue
-    after_times=times[10:]
-    f=lookup.reindex(pd.MultiIndex.from_product([[int(front.vehicle_id)],after_times],names=lookup.index.names))
-    r=lookup.reindex(pd.MultiIndex.from_product([[int(rear.vehicle_id)],after_times],names=lookup.index.names))
-    if f.local_y.isna().any() or r.local_y.isna().any() or not f.lane_id.eq(target_lane).all() or not r.lane_id.eq(target_lane).all(): continue
-    e=ego.iloc[10:]
-    front_spacing=f.local_y.to_numpy()-e.local_y.to_numpy()
-    rear_spacing=e.local_y.to_numpy()-r.local_y.to_numpy()
-    front_headway=np.divide(front_spacing,e.v_vel.to_numpy(),out=np.full(len(e),np.inf),where=e.v_vel.to_numpy()>=.5)
-    rear_headway=np.divide(rear_spacing,r.v_vel.to_numpy(),out=np.full(len(e),np.inf),where=r.v_vel.to_numpy()>=.5)
-    conflict=int(((front_headway<1.5)|(rear_headway<1.5)|(front_spacing-f.v_length.to_numpy()<2)|(rear_spacing-e.v_length.to_numpy()<2)).any())
-    lane_rows.append(dict(vehicle_id=int(move.vehicle_id),front_id=int(front.vehicle_id),rear_id=int(rear.vehicle_id),decision_time=decision,outcome_end=crossing+1000,from_lane=int(move.from_lane),target_lane=target_lane,ego_speed=float(current.v_vel),front_speed=float(front.v_vel),rear_speed=float(rear.v_vel),front_gap=float(fg),rear_gap=float(rg),conflict=conflict))
-    if len(lane_examples)<12:
-        lane_examples.append(dict(vehicle_id=int(move.vehicle_id),from_lane=int(move.from_lane),target_lane=target_lane,conflict=conflict,trace=[dict(seconds=float((t-decision)/1000),x=float(row.local_y-current.local_y),lateral=float(row.local_x),lane=int(row.lane_id)) for t,(_,row) in zip(times,ego.iterrows())]))
-lane_data=pd.DataFrame(lane_rows)
-print('Recorded adjacent transitions:',len(transitions),'Eligible observed maneuvers:',len(lane_data))
-print('Proxy outcomes:',lane_data.conflict.value_counts().to_dict())
-display(lane_data.head())
-assert lane_data.conflict.nunique()==2''')
-md('''### Isolated lane-change training
-Keep all observations of a maneuver together. Use the same chronological block boundaries, exclude crossing trajectories for ego **and both target-lane neighbors**, and keep complete outcomes inside each partition. There is one row per observed maneuver; never randomly split consecutive traffic frames. Compare the same three syllabus models with scaling fitted only on training/CV folds. The small maneuver sample and selection by drivers limit reliability; neither a low score nor the absence of a recorded proxy event proves a maneuver is safe.''')
-code('''lane_features=['ego_speed','front_speed','rear_speed','front_gap','rear_gap']
-lane_parts=[]
-for low,high in [(start,cut1),(cut1,cut2),(cut2,end+1)]:
-    ids=bounds.index[(bounds['min']>=low)&(bounds['max']<high)]
-    lane_parts.append(lane_data[lane_data.vehicle_id.isin(ids)&lane_data.front_id.isin(ids)&lane_data.rear_id.isin(ids)&(lane_data.decision_time>=low)&(lane_data.outcome_end<high)].copy())
-lt,lv,le=lane_parts
-for name,p in zip(['training','validation','test'],lane_parts): print(name,len(p),p.conflict.value_counts().to_dict())
-for a,b in [(lt,lv),(lt,le),(lv,le)]:
-    assert not set(a[['vehicle_id','front_id','rear_id']].to_numpy().ravel()) & set(b[['vehicle_id','front_id','rear_id']].to_numpy().ravel())
-assert all(p.conflict.nunique()==2 for p in lane_parts)
-# Purged expanding folds inside the lane-change training partition.
-lane_folds=[]
-for fraction in [.5,.7,.85]:
-    boundary=lt.decision_time.quantile(fraction)
-    a=lt[lt.outcome_end<boundary]; b=lt[lt.decision_time>boundary]
-    shared=set(a[['vehicle_id','front_id','rear_id']].to_numpy().ravel()) & set(b[['vehicle_id','front_id','rear_id']].to_numpy().ravel())
-    a=a[~a[['vehicle_id','front_id','rear_id']].isin(shared).any(axis=1)]
-    b=b[~b[['vehicle_id','front_id','rear_id']].isin(shared).any(axis=1)]
-    if a.conflict.nunique()==2 and b.conflict.nunique()==2:
-        lane_folds.append((np.flatnonzero(lt.index.isin(a.index)),np.flatnonzero(lt.index.isin(b.index))))
-assert len(lane_folds)>=2
-print('Purged lane-change CV:',[(len(a),len(b)) for a,b in lane_folds])
-def lane_evaluate(model,part):
-    pred=model.predict(part[lane_features]); prob=model.predict_proba(part[lane_features])[:,1]
-    return dict(accuracy=accuracy_score(part.conflict,pred),precision=precision_score(part.conflict,pred,zero_division=0),recall=recall_score(part.conflict,pred,zero_division=0),f1=f1_score(part.conflict,pred,zero_division=0),roc_auc=roc_auc_score(part.conflict,prob),confusion_matrix=confusion_matrix(part.conflict,pred).tolist())
-lane_models={}; lane_results=[]
-for name,estimator,grid in [('Logistic Regression',LogisticRegression(max_iter=2000,random_state=42),{'model__C':[.1,1,10]}),('LDA',LinearDiscriminantAnalysis(solver='lsqr'),{'model__shrinkage':['auto',.1]}),('QDA',QuadraticDiscriminantAnalysis(),{'model__reg_param':[.1,.5]})]:
-    search=GridSearchCV(Pipeline([('scale',StandardScaler()),('model',estimator)]),grid,cv=lane_folds,scoring='f1',n_jobs=1,error_score='raise')
-    search.fit(lt[lane_features],lt.conflict)
-    lane_models[name]=search.best_estimator_
-    lane_results.append(dict(name=name,cv_f1=search.best_score_,parameters=search.best_params_,training=lane_evaluate(search.best_estimator_,lt),validation=lane_evaluate(search.best_estimator_,lv)))
-display(pd.DataFrame([dict(model=r['name'],cv_f1=r['cv_f1'],**{k:v for k,v in r['validation'].items() if k!='confusion_matrix'}) for r in lane_results]))''')
-code('''lane_winner=max(lane_results,key=lambda r:(r['validation']['f1'],r['validation']['roc_auc']))
-lane_model=lane_models[lane_winner['name']]
-lane_test=lane_evaluate(lane_model,le)
-print('Selected lane-change proxy model:',lane_winner['name'],'Untouched test:',lane_test)
-print('Always-conflict test baseline F1:',f1_score(le.conflict,np.ones(len(le),dtype=int)))
-fig,axes=plt.subplots(1,2,figsize=(11,4))
-for label,p in [('No observed proxy conflict',lane_data[lane_data.conflict==0]),('Observed proxy conflict',lane_data[lane_data.conflict==1])]:
-    axes[0].scatter(p.front_gap,p.rear_gap,s=12,alpha=.5,label=label)
-axes[0].set(xlabel='Target front bumper gap at assessment (m)',ylabel='Target rear bumper gap at assessment (m)'); axes[0].legend(fontsize=8)
-sns.heatmap(lane_test['confusion_matrix'],annot=True,fmt='d',cbar=False,ax=axes[1]); axes[1].set(title='Selected lane-change model: test',xlabel='Predicted proxy',ylabel='Observed proxy')
-plt.tight_layout(); plt.show()
-# A real trajectory crosses between lanes: no synthetic crash animation is used here.
-trace=lane_examples[0]['trace']; plt.plot([p['seconds'] for p in trace],[p['lateral'] for p in trace]); plt.xlabel('Seconds since assessment'); plt.ylabel('Recorded lateral position (m)'); plt.title('An actual recorded lane transition'); plt.show()''')
-code('''lane_info=dict(name=lane_winner['name'],version='nearmiss-lane-1',features=lane_features,units={k:('m/s' if 'speed' in k else 'm bumper gap') for k in lane_features},ranges={k:[float(lt[k].min()),float(lt[k].max())] for k in lane_features},target='Observed front/rear headway below 1.5 s or bumper gap below 2 m in first second after actual lane-ID crossing; assessed 1 s before crossing',decision_threshold=.5,probability_note='Uncalibrated close-conflict proxy conditional on observed lane changes; not verified crash probability')
-lane_metrics=dict(selected_model=lane_winner['name'],comparison=lane_results,test=lane_test,baseline_f1=float(f1_score(le.conflict,np.ones(len(le),dtype=int))),split_sizes={name:len(p) for name,p in zip(['train','validation','test'],lane_parts)},recorded_transitions=len(transitions),eligible_maneuvers=len(lane_data),outcomes={str(k):int(v) for k,v in lane_data.conflict.value_counts().items()},protocol='Observed maneuvers only; chronological 60/20/20; disjoint ego and both neighbors; purged expanding training CV; validation F1 selection; once-only test',examples=lane_examples,limitations=['No verified accident labels','No counterfactual labels for unattempted maneuvers','Assessment is pre-crossing, not necessarily before lateral movement begins','Small single-recording sample; probabilities uncalibrated','An empty lane is handled by geometry, not invented model inputs'])
-# Exact fitted linear pipeline parameters enable genuine local inference when Render is cold.
-# This is the learned model, not a manually invented risk formula.
-if lane_winner['name'] in ['Logistic Regression','LDA']:
-    scale=lane_model.named_steps['scale']; linear=lane_model.named_steps['model']
-    lane_info['browser_model']=dict(kind='scaled-logit',mean=scale.mean_.tolist(),scale=scale.scale_.tolist(),coefficients=linear.coef_[0].tolist(),intercept=float(linear.intercept_[0]))
-supported_test=le[le[lane_features].ge(lt[lane_features].min()).all(axis=1)&le[lane_features].le(lt[lane_features].max()).all(axis=1)].head(8)
-assert len(supported_test)>0
-lane_info['checks']=[dict(inputs=row[lane_features].to_dict(),probability=float(lane_model.predict_proba(pd.DataFrame([row[lane_features]]))[0,1])) for _,row in supported_test.iterrows()]
-joblib.dump(lane_model,OUT/'lane_change.joblib')
-for name,value in [('lane-info',lane_info),('lane-metrics',lane_metrics)]:
-    for folder in [OUT,PUBLIC]: (folder/f'{name}.json').write_text(json.dumps(value,indent=2,allow_nan=False),encoding='utf-8')
-(OUT/'lane-example.json').write_text(json.dumps(supported_test[lane_features].iloc[0].to_dict(),indent=2))
-print('Lane-change artifact and actual recorded examples exported.')''')
-md('''### How these findings enter the simulator
-For an approaching uncollided car, inspect both neighboring lanes, front/rear gaps, approaching rear vehicles and the entire lateral path. Empty lanes can be accepted by explicit geometry; a trained score is shown only when its real feature requirements and training ranges are met. For supported occupied-lane candidates, the actual fitted lane-change proxy model can veto a high-conflict estimate; a low estimate still needs geometric clearance. If ML is unavailable, the UI states that fact and uses conservative documented movement rules without inventing percentages. Cars already involved in simulated contact remain stopped obstacles.
-
-Six displayed lanes do not imply a six-lane NGSIM training recording. Lane IDs are omitted from the model; interactions are represented by speeds and front/rear gaps. This allows illustrative geometry on 1–8 lanes without inventing lane identifiers, but does not establish external validity for six-lane incident management.''')
+traffic_seeds=[]
+for instant in np.linspace(train.global_time.min(),train.global_time.max(),12):
+    t=min(frames,key=lambda x:abs(x-instant)); f=frames[t].sort_values('local_y')
+    if len(f)<30: continue
+    f=f.head(40); origin=f.local_y.min()
+    traffic_seeds.append([dict(source_id=int(v.vehicle_id),lane=int(v.lane_id)-1,x=float(v.local_y-origin+20),speed=float(v.v_vel),accel=float(v.v_acc),length=float(v.v_length),width=float(v.v_width),type={1:'Motorcycle',2:'Car',3:'Truck'}[int(v.v_class)]) for v in f.itertuples()])
+analytics=dict(task=info['task'],version=info['version'],rows=len(raw),vehicles=int(raw.vehicle_id.nunique()),recording_count=1,duration_seconds=float((end-start)/1000),eligible_rows=len(eligible),recorded_crossings=transition_count,positive_rate=float(eligible.target.mean()),class_counts={str(k):int(v) for k,v in eligible.target.value_counts().items()},source=SOURCE,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),missing_values=raw.isna().sum().to_dict(),duplicates=duplicates,histograms={c:histogram(observed.loc[valid_leader,c].clip(upper=10) if c=='headway' else observed.loc[valid_leader,c]) for c in ['v_vel','v_acc','front_gap','headway','lane_id','v_class']},correlation=sample[features+['target']].corr().fillna(0).round(3).to_dict(),statistics=df[['v_vel','v_acc','v_length','space_headway']].agg(['mean','median','var','std','min','max']).to_dict(),traffic_seeds=traffic_seeds)
+for folder in [OUT,PUBLIC]: (folder/'analytics.json').write_text(json.dumps(analytics,indent=2,allow_nan=False),encoding='utf-8')
+print('Training-period traffic snapshots:',len(traffic_seeds))''')
 md('''## Conclusion
-This project uses real NGSIM trajectories to study future close-following conditions and close-conflict proxies around observed lane changes. Logistic Regression, LDA and QDA were compared using isolated chronological partitions. Logistic Regression achieved the highest validation F1 for both tasks. The selected models obtained test F1 scores of 0.8705 for close following and 0.8333 for the lane-change proxy.
+The project predicts a recorded vehicle's lane crossing within a complete two-second future window. It compares Logistic Regression, LDA and QDA using common current/past features, isolated chronological partitions and training-only tuning. Test performance must be compared with always staying in lane, including minority-class recall, F1 and average precision.
 
-These results do not establish verified accident prediction. The following target includes persistence of an already short headway, while the lane-change study is based on a small, imbalanced sample of observed maneuvers. Baseline comparisons, uncalibrated probabilities and the absence of counterfactual outcomes limit the conclusions. Evaluation across independent recordings is needed before claiming broader generalization.
+The model estimates observed behavior, not verified accidents, safe maneuvers or the best lane to choose. Recorded replay follows actual observations independently of predictions. Generated scenes use adapted training snapshots or explicitly synthetic presets; their movement controller and geometric collision detection remain separate. A single recording, class imbalance, noisy lane IDs and cues from lateral motion already underway limit generalization. Independent-recording validation is needed before broader claims.''')
 
-The simulator combines learned conflict estimates with explicit clearance and movement rules. Its collisions are hypothetical geometric contacts, separate from the historical prediction targets. Recorded trajectories, generated scenarios and model-estimated scores must remain clearly distinguished.''')
-for i,c in enumerate(cells): c['id']=f'nearmiss-{i:02}'
+for i,c in enumerate(cells): c['id']=f'behavior-{i:02}'
 path=Path('notebooks/NearMiss.ipynb')
 path.write_text(json.dumps(dict(nbformat=4,nbformat_minor=5,metadata={'kernelspec':{'display_name':'Python 3','language':'python','name':'python3'}},cells=cells),indent=1,ensure_ascii=False),encoding='utf-8')
 print(len(cells),'cells written')
